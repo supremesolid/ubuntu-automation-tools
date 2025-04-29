@@ -57,8 +57,9 @@ cd $NAME
 wget https://supremesolid.github.io/ubuntu-automation-tools/Mtasa/entrypoint.sh
 
 chown mtasa:mtasa entrypoint.sh
+chmod -R 777 entrypoint.sh
 
-docker run -i -d \
+docker run -it -d \
   --name "$NAME" \
   --network host \
   --workdir "/home/mtasa/$NAME" \
