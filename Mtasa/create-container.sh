@@ -48,4 +48,20 @@ cd /home/mtasa
 
 chown -R mtasa:mtasa $NAME
 
+cd /entrypoints/mtasa
 
+mkdir $NAME
+
+cd $NAME
+
+wget https://supremesolid.github.io/ubuntu-automation-tools/Mtasa/entrypoint.sh
+
+docker run -i -d \
+  --network host \
+  --workdir /home/mtasa/$NAME \
+  --user mtasa \
+  --entrypoint /entrypoints/mtasa/$NAME/entrypoint.sh \
+  -v /home/mtasa:/home/mtasa/$NAME \
+  -v /entrypoints/mtasa/$NAME
+  supremesolid/mtasa:lts \
+  /home/mtasa/$NAME/mta-server64
