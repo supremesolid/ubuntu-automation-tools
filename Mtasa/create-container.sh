@@ -62,6 +62,6 @@ docker run -i -d \
   --user mtasa \
   --entrypoint /entrypoints/mtasa/$NAME/entrypoint.sh \
   -v /home/mtasa:/home/mtasa/$NAME \
-  -v /entrypoints/mtasa/$NAME
+  -v /entrypoints/mtasa/$NAME \
   supremesolid/mtasa:lts \
   /home/mtasa/$NAME/mta-server64
