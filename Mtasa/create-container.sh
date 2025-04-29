@@ -57,12 +57,12 @@ cd $NAME
 wget https://supremesolid.github.io/ubuntu-automation-tools/Mtasa/entrypoint.sh
 
 docker run -i -d \
-  --name $NAME
+  --name "$NAME" \
   --network host \
-  --workdir /home/mtasa/$NAME \
+  --workdir "/home/mtasa/$NAME" \
   --user mtasa \
-  --entrypoint /entrypoints/mtasa/$NAME/entrypoint.sh \
-  -v /home/mtasa:/home/mtasa/$NAME \
-  -v /entrypoints/mtasa/$NAME:/entrypoints/mtasa/$NAME \
+  --entrypoint "/entrypoints/mtasa/$NAME/entrypoint.sh" \
+  -v "/home/mtasa/$NAME:/home/mtasa/$NAME" \
+  -v "/entrypoints/mtasa/$NAME:/entrypoints/mtasa/$NAME" \
   supremesolid/mtasa:lts \
-  /home/mtasa/$NAME/mta-server64
+  "/home/mtasa/$NAME/mta-server64"
