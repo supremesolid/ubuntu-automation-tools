@@ -48,7 +48,7 @@ cd /home/mtasa
 
 chown -R mtasa:mtasa $NAME
 
-cd /entrypoints/mtasa
+cd /docker/mtasa
 
 mkdir $NAME
 
@@ -64,8 +64,8 @@ docker create -it \
   --network host \
   --workdir "/home/mtasa/$NAME" \
   --user mtasa \
-  --entrypoint "/entrypoints/mtasa/$NAME/entrypoint.sh" \
+  --entrypoint "/docker/mtasa/$NAME/entrypoint.sh" \
   -v "/home/mtasa/$NAME:/home/mtasa/$NAME" \
-  -v "/entrypoints/mtasa/$NAME:/entrypoints/mtasa/$NAME" \
+  -v "/docker/mtasa/$NAME:/docker/mtasa/$NAME" \
   supremesolid/mtasa:lts \
   "/home/mtasa/$NAME/mta-server64"
