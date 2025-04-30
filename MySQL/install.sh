@@ -8,7 +8,7 @@ set -euo pipefail
 
 # === Constantes ===
 readonly MYSQL_CONFIG_FILE="/etc/mysql/mysql.conf.d/mysqld.cnf"
-# Default values (optional, could be removed if args are always required)
+# Default values
 DEFAULT_BIND_ADDRESS="127.0.0.1"
 DEFAULT_BIND_PORT="3306"
 DEFAULT_MYSQLX_PORT="33060"
@@ -155,27 +155,61 @@ systemctl status mysql --no-pager # Mostra o status para verificação rápida
 # --- 3. Configuração do Plugin auth_socket e Usuário Root ---
 echo "[5/5] Configurando autenticação auth_socket para root@localhost..."
 
-# Nota: Em muitas instalações recentes do MySQL no Ubuntu, o auth_socket
-# já é o padrão para root@localhost e o plugin já está ativo/compilado.
-# Estes comandos garantem o estado desejado. O comando INSTALL PLUGIN pode
-# falhar se o plugin já estiver ativo ou for built-in, o que geralmente é seguro ignorar
-# nesse contexto específico, pois o objetivo final é usar o ALTER USER.
+# Passo 1: Tentar instalar/carregar o plugin separadamente.
+# Isso garante que o plugin seja carregado se possível, mas lida com o caso
+# de ele já estar ativo ou ser built-in.
+echo "Tentando garantir que o plugin auth_socket esteja carregado..."
+# Executa o comando e captura a saída de erro (stderr). Redireciona stderr para stdout (2>&1).
+# Usa '|| true' para que o script não saia imediatamente (set -e) se o mysql retornar um erro.
+install_output=$(sudo mysql -e "INSTALL PLUGIN auth_socket SONAME 'auth_socket.so';" 2>&1 || true)
+install_exit_code=$? # Captura o código de saída real do comando mysql
 
-# Usamos um Here Document para passar os comandos SQL para o cliente mysql
-# Executamos como root do sistema, que geralmente pode se conectar via socket sem senha
+# Verifique a saída e o código de saída
+# Código de saída 0 significa sucesso.
+# Código de saída diferente de 0 indica um problema.
+if [[ ${install_exit_code} -ne 0 ]]; then
+    # Verifique se o erro é o esperado "already exists" (código 1125, ER_PLUGIN_ALREADY_INSTALLED)
+    # A mensagem exata pode variar ligeiramente entre versões do MySQL.
+    if echo "$install_output" | grep -q -E "Plugin 'auth_socket' already exists|ER_PLUGIN_ALREADY_INSTALLED|code: 1125"; then
+        echo "INFO: Plugin auth_socket já está instalado/ativo (erro esperado ignorado)."
+    # Verifique se o erro foi não conseguir encontrar o arquivo .so
+    elif echo "$install_output" | grep -q -E "Can't open shared library|não pode abrir"; then
+         error_exit "Falha CRÍTICA ao instalar plugin auth_socket: Arquivo 'auth_socket.so' não encontrado ou inacessível. Verifique a instalação do MySQL. Saída: $install_output"
+    # Verifique se o erro foi que o plugin não pode ser inicializado (pode acontecer se for built-in)
+    # Código 1688: ER_PLUGIN_CANNOT_BE_INITIALIZED (às vezes indica built-in)
+    elif echo "$install_output" | grep -q -E "Plugin 'auth_socket' is not loaded|code: 1688"; then
+         echo "INFO: Plugin auth_socket parece ser built-in ou teve problema na inicialização (verificar logs se ALTER USER falhar). Saída: $install_output"
+         # Neste caso, prosseguimos, pois o ALTER USER é o teste final.
+    else
+        # Outro erro inesperado durante a tentativa de instalação do plugin
+        error_exit "Falha inesperada ao tentar instalar/carregar plugin auth_socket. Código: ${install_exit_code}. Saída: $install_output"
+    fi
+else
+     # Código de saída foi 0
+     echo "Plugin auth_socket instalado/carregado com sucesso."
+fi
+
+
+# Passo 2: Configurar o usuário root para usar o plugin.
+# Executamos isso independentemente do resultado exato do passo 1,
+# desde que não tenha sido um erro fatal (como .so não encontrado).
+# Se o plugin não estiver realmente utilizável (built-in ou carregado),
+# este comando ALTER USER falhará, o que é o comportamento correto.
+echo "Configurando 'root'@'localhost' para usar auth_socket..."
 if ! sudo mysql <<-EOF; then
-    -- Tenta instalar/carregar o plugin. Pode falhar se já ativo/built-in (geralmente OK).
-    -- Em caso de erro aqui, verificar os logs do MySQL se a autenticação falhar depois.
-    INSTALL PLUGIN IF NOT EXISTS auth_socket SONAME 'auth_socket.so';
-
     -- Altera o método de autenticação para root@localhost
     ALTER USER 'root'@'localhost' IDENTIFIED WITH auth_socket;
 
     -- Aplica as alterações de privilégio
     FLUSH PRIVILEGES;
 EOF
-  error_exit "Falha ao executar comandos SQL para configurar auth_socket. Verifique os logs do MySQL (/var/log/mysql/error.log)."
+  # Se este comando falhar, significa que, apesar das tentativas anteriores,
+  # o plugin auth_socket não está disponível/ativo para o servidor MySQL.
+  error_exit "Falha ao executar ALTER USER 'root'@'localhost' IDENTIFIED WITH auth_socket. Isso geralmente significa que o plugin auth_socket não está ativo ou disponível no servidor. Verifique a instalação e os logs do MySQL (/var/log/mysql/error.log)."
 fi
+
+echo "Autenticação auth_socket configurada com sucesso para root@localhost."
+
 
 echo "---"
 echo "Configuração do MySQL concluída com sucesso!"
