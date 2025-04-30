@@ -22,7 +22,7 @@
 set -euo pipefail
 
 # === Constantes e Padrões ===
-DEFAULT_CONFIG_FILE="/etc/mysql/mysql.conf.d/99-custom-mysqld.cnf"
+DEFAULT_CONFIG_FILE="/etc/mysql/mysql.conf.d/mysqld.cnf"
 EXPECTED_MANDATORY_ARGS=4
 DEFAULT_INNODB_BUFFER_POOL_SIZE="1G" # Padrão CONSERVADOR. Ajuste conforme necessidade base.
 
