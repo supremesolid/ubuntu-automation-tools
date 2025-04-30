@@ -20,7 +20,7 @@ set -euo pipefail
 
 # === Constantes e Padrões ===
 # Usar /etc/mysql/conf.d/ é comum mesmo para MariaDB em sistemas Debian/Ubuntu
-DEFAULT_CONFIG_FILE="/etc/mysql/conf.d/99-custom-mariadb.cnf"
+DEFAULT_CONFIG_FILE="/docker/apps/mariadb/etc/mysql/mariadb.conf.d/50-server.cnf"
 EXPECTED_MANDATORY_ARGS=4
 DEFAULT_INNODB_BUFFER_POOL_SIZE="1G" # Padrão CONSERVADOR.
 
@@ -36,7 +36,7 @@ MARIADB_INNODB_BUFFER_POOL_SIZE=""
 
 # === Variáveis de Controle de Serviço ===
 # O nome do serviço geralmente ainda é 'mysql' para compatibilidade
-SERVICE_NAME="mysql"
+SERVICE_NAME="mariadb"
 START_CMD=""
 STATUS_CMD=""
 IS_ACTIVE_CMD=""
