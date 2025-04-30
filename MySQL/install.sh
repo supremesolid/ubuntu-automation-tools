@@ -64,7 +64,7 @@ fi
 
 echo "Configurando 'root'@'localhost' para usar auth_socket..."
 
-if ! sudo mysql <<-EOF; then
+if ! mysql <<-EOF; then
     -- Altera o método de autenticação para root@localhost
     ALTER USER 'root'@'localhost' IDENTIFIED WITH auth_socket;
 
