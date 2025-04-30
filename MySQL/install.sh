@@ -21,26 +21,29 @@ check_root() {
 
 check_root
 
-echo "[1/5] Atualizando lista de pacotes..."
+echo "[1/4] Atualizando lista de pacotes..."
 apt-get update || error_exit "Falha ao atualizar lista de pacotes (apt-get update)."
 
-echo "[2/5] Instalando mysql-server..."
+echo "[2/4] Instalando mysql-server..."
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get install -y mysql-server || error_exit "Falha ao instalar mysql-server."
 unset DEBIAN_FRONTEND
 
-echo "[3/5] Reiniciando o serviço MySQL para aplicar as configurações..."
-service mysql restart || error_exit "Falha ao reiniciar o serviço MySQL."
+echo "[3/4] Reiniciando o serviço MySQL para aplicar as configurações..."
+
+service mysql stop
+usermod -d /var/lib/mysql/ mysql
+service mysql start
 service mysql status --no-pager 
 
 # --- 3. Configuração do Plugin auth_socket e Usuário Root ---
-echo "[4/5] Configurando autenticação auth_socket para root@localhost..."
+echo "[4/4] Configurando autenticação auth_socket para root@localhost..."
 
 echo "Tentando garantir que o plugin auth_socket esteja carregado..."
 
 install_output=$(sudo mysql -e "INSTALL PLUGIN auth_socket SONAME 'auth_socket.so';" 2>&1 || true)
-install_exit_code=$? # Captura o código de saída real do comando mysql
+install_exit_code=$? 
 
 if [[ ${install_exit_code} -ne 0 ]]; then
 
