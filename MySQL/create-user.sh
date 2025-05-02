@@ -8,7 +8,7 @@ TARGET_MYSQL_PASSWORD=""
 PERMISSION_LEVEL=""
 TARGET_DATABASE=""
 MYSQL_HOST="localhost"
-AUTH_PLUGIN="mysql_native_password" # Definido para auth_socket como padrão
+AUTH_PLUGIN="mysql_native_password" # Padrão mudado para refletir o uso comum
 
 # === Funções ===
 error_exit() {
@@ -28,13 +28,14 @@ usage() {
   echo "    --database=<DB>               Banco de dados alvo. OBRIGATÓRIO se --permission-level=default."
   echo
   echo "  Parâmetros Opcionais:"
-  echo "    --mysql-password=<SENHA>      Senha para o novo usuário (não utilizada com auth_socket)."
+  echo "    --mysql-password=<SENHA>      Senha para o novo usuário (OBRIGATÓRIO a menos que --auth-plugin=auth_socket)."
   echo "    --mysql-host=<HOST>           Host de onde o novo usuário poderá se conectar (padrão: 'localhost'). Use '%' para qualquer host."
-  echo "    --auth-plugin=<PLUGIN>        Plugin de autenticação a ser usado (padrão: 'mysql_native_password')."
+  echo "    --auth-plugin=<PLUGIN>        Plugin de autenticação a ser usado (padrão: 'mysql_native_password'). Use 'auth_socket' para autenticação via socket Unix (senha ignorada)."
   echo
   echo "  Níveis de Permissão Definidos:"
   echo "    administrator:  ALL PRIVILEGES ON *.* WITH GRANT OPTION (Acesso total. MUITO CUIDADO!)."
-  echo "    default:        SELECT, INSERT, UPDATE, DELETE, EXECUTE, CREATE TEMPORARY TABLES no banco de dados especificado (--database)."
+  # Atualizada a descrição do default
+  echo "    default:        SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, INDEX, EXECUTE, CREATE TEMPORARY TABLES no banco de dados especificado (--database)."
   echo
   echo "  AVISO DE SEGURANÇA: Passar a senha via argumento é inseguro."
   echo "  REQUISITO: Executar com sudo."
@@ -109,7 +110,7 @@ fi
 
 # === Aviso adicional para auth_socket ===
 if [[ "${AUTH_PLUGIN}" == "auth_socket" ]]; then
-  echo ">>> AVISO: Usando auth_socket. A senha informada será ignorada."
+  echo ">>> AVISO: Usando auth_socket. A senha informada (--mysql-password) será IGNORADA."
 fi
 
 # === Lógica Principal ===
@@ -119,7 +120,9 @@ echo ">>> Iniciando criação do usuário '${TARGET_MYSQL_USER}'@'${MYSQL_HOST}'
 if [[ "${AUTH_PLUGIN}" == "auth_socket" ]]; then
   SQL_CREATE_USER="CREATE USER IF NOT EXISTS '${TARGET_MYSQL_USER}'@'${MYSQL_HOST}' IDENTIFIED WITH ${AUTH_PLUGIN};"
 else
-  SQL_CREATE_USER="CREATE USER IF NOT EXISTS '${TARGET_MYSQL_USER}'@'${MYSQL_HOST}' IDENTIFIED WITH ${AUTH_PLUGIN} BY '${TARGET_MYSQL_PASSWORD}';"
+  # Usa mysql_native_password como padrão se não especificado outro plugin que requeira senha
+  TARGET_AUTH_PLUGIN=${AUTH_PLUGIN:-mysql_native_password}
+  SQL_CREATE_USER="CREATE USER IF NOT EXISTS '${TARGET_MYSQL_USER}'@'${MYSQL_HOST}' IDENTIFIED WITH ${TARGET_AUTH_PLUGIN} BY '${TARGET_MYSQL_PASSWORD}';"
 fi
 
 echo ">>> Executando: CREATE USER..."
@@ -137,9 +140,9 @@ administrator)
   SQL_GRANT="GRANT ALL PRIVILEGES ON *.* TO '${TARGET_MYSQL_USER}'@'${MYSQL_HOST}' WITH GRANT OPTION;"
   ;;
 default)
-  # Permissões básicas no banco de dados especificado. Adicionar/Remover conforme necessário.
-  # Usar backticks ` ao redor do nome do banco de dados para segurança caso contenha caracteres especiais.
-  SQL_GRANT="GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE, CREATE TEMPORARY TABLES ON \`${TARGET_DATABASE}\`.* TO '${TARGET_MYSQL_USER}'@'${MYSQL_HOST}';"
+  # *** LINHA MODIFICADA ABAIXO ***
+  # Permissões necessárias para ProFTPD gerenciar usuários e cotas no DB especificado.
+  SQL_GRANT="GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, INDEX, EXECUTE, CREATE TEMPORARY TABLES ON \`${TARGET_DATABASE}\`.* TO '${TARGET_MYSQL_USER}'@'${MYSQL_HOST}';"
   ;;
 esac
 
@@ -147,7 +150,7 @@ esac
 if [[ -n "${SQL_GRANT}" ]]; then
   echo ">>> Executando: GRANT..."
   if ! mysql --execute="${SQL_GRANT}"; then
-    error_exit "Falha ao executar GRANT. Verifique:"$'\n'"  - Se o banco de dados '${TARGET_DATABASE}' existe (para nível default)."$'\n'"  - Permissões do usuário MySQL."$'\n'"  - Logs do MySQL."
+    error_exit "Falha ao executar GRANT. Verifique:"$'\n'"  - Se o banco de dados '${TARGET_DATABASE}' existe (para nível default)."$'\n'"  - Permissões do usuário MySQL que executa o script."$'\n'"  - Logs do MySQL."
   fi
   echo ">>> Permissões concedidas com sucesso."
 else
