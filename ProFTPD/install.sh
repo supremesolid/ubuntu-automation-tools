@@ -2,14 +2,14 @@
 
 # === Variáveis Globais (serão preenchidas pelos argumentos obrigatórios) ===
 MYSQL_PROFTPD_USER=""
-MYSQL_PROFTPD_PASSWORD=""
+# MYSQL_PROFTPD_PASSWORD="" # Removido - Não é mais necessário
 # *** Host fixo em 'localhost' ***
 MYSQL_PROFTPD_HOST="localhost"
 
 # === Constantes ===
 MYSQL_PROFTPD_DB="proftpd"
 PROFTPD_CONFIG_DIR="/etc/proftpd"
-# Certifique-se que esta URL aponte para a VERSÃO CORRIGIDA do create-user.sh
+# Certifique-se que esta URL aponte para a VERSÃO CORRIGIDA do create-user.sh (com permissão CREATE)
 CREATE_USER_SCRIPT_URL="https://supremesolid.github.io/ubuntu-automation-tools/MySQL/create-user.sh"
 SQL_SCHEMA_URL="https://supremesolid.github.io/ubuntu-automation-tools/ProFTPD/proftpd.sql"
 CONFIG_BASE_URL="https://supremesolid.github.io/ubuntu-automation-tools/ProFTPD/configs"
@@ -28,15 +28,15 @@ CONFIG_FILES=(
 
 # === Funções Auxiliares ===
 usage() {
-    echo "Uso: $0 --username=<usuario> --password=<senha>"
+    # Atualizado para remover --password
+    echo "Uso: $0 --username=<usuario>"
     echo ""
     echo "Parâmetros Obrigatórios:"
-    echo "  --username=<usuario>  Nome do usuário MySQL para o ProFTPD"
-    echo "  --password=<senha>    Senha do usuário MySQL para o ProFTPD"
+    echo "  --username=<usuario>  Nome do usuário MySQL para o ProFTPD (será configurado com auth_socket)."
     echo ""
-    echo "Exemplo: $0 --username=proftpd --password=SenhaSegura123"
+    echo "Exemplo: $0 --username=proftpd"
     echo ""
-    echo "Nota: O host MySQL está fixo em '$MYSQL_PROFTPD_HOST' neste script."
+    echo "Nota: O host MySQL está fixo em '$MYSQL_PROFTPD_HOST' e a autenticação usada será 'auth_socket'."
     exit 1
 }
 
@@ -65,16 +65,16 @@ check_error() {
 }
 
 # === Processamento de Argumentos ===
+# Removido o processamento de --password
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --username=*)
             MYSQL_PROFTPD_USER="${1#*=}"
             shift
             ;;
-        --password=*)
-            MYSQL_PROFTPD_PASSWORD="${1#*=}"
-            shift
-            ;;
+        # --password=*) # REMOVIDO
+            # shift
+            # ;;
         --help|-h)
             usage
             ;;
@@ -86,13 +86,14 @@ while [[ $# -gt 0 ]]; do
 done
 
 # === Validação de Argumentos Obrigatórios ===
+# Removida a validação de --password
 MISSING_ARGS=()
 if [[ -z "$MYSQL_PROFTPD_USER" ]]; then
     MISSING_ARGS+=("--username")
 fi
-if [[ -z "$MYSQL_PROFTPD_PASSWORD" ]]; then
-    MISSING_ARGS+=("--password")
-fi
+# if [[ -z "$MYSQL_PROFTPD_PASSWORD" ]]; then # REMOVIDO
+#     MISSING_ARGS+=("--password")
+# fi
 
 if [[ ${#MISSING_ARGS[@]} -ne 0 ]]; then
     echo "ERRO: Os seguintes parâmetros obrigatórios não foram fornecidos: ${MISSING_ARGS[*]}"
@@ -108,7 +109,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # Verifica dependências
-for cmd in mysql curl proftpd systemctl sed; do # Adicionado sed à lista
+for cmd in mysql curl proftpd systemctl sed; do
     if ! command -v $cmd &> /dev/null; then
         echo "INFO: Comando '$cmd' não encontrado. Tentando instalar dependências..."
         apt update > /dev/null
@@ -118,10 +119,9 @@ for cmd in mysql curl proftpd systemctl sed; do # Adicionado sed à lista
             curl)       pkg="curl" ;;
             proftpd)    pkg="proftpd-core" ;;
             systemctl)  pkg="systemd" ;;
-            sed)        pkg="sed" ;; # Geralmente já instalado
+            sed)        pkg="sed" ;;
             *)          echo "ERRO: Dependência desconhecida '$cmd'"; exit 1 ;;
         esac
-        # Instala apenas se não for systemd ou se realmente não estiver presente
         if [[ "$pkg" != "systemd" && "$pkg" != "sed" ]] || ! command -v $cmd &>/dev/null; then
              echo "Instalando $pkg..."
              apt install -y "$pkg"
@@ -136,13 +136,13 @@ done
 
 
 # === Início da Execução ===
-# Atualizando a contagem de passos para 8
-echo "--- Iniciando a configuração do ProFTPD com MySQL ---"
+echo "--- Iniciando a configuração do ProFTPD com MySQL (usando auth_socket) ---" # Mensagem atualizada
 echo "Usando Configurações MySQL para ProFTPD:"
 echo "  Usuário: $MYSQL_PROFTPD_USER"
-echo "  Senha: [OCULTA]"
+# echo "  Senha: [OCULTA]" # REMOVIDO
 echo "  Host:  $MYSQL_PROFTPD_HOST (Fixo)"
 echo "  DB:    $MYSQL_PROFTPD_DB"
+echo "  Auth:  auth_socket (sem senha)" # Adicionado
 echo "--------------------------------------------------"
 
 # 1. Instalar Módulos Específicos do ProFTPD
@@ -152,19 +152,20 @@ apt install -y proftpd-mod-mysql proftpd-mod-crypto proftpd-mod-ldap
 check_error "apt install proftpd-mods"
 echo "Módulos ProFTPD instalados com sucesso."
 
-# 2. Criar Usuário MySQL
+# 2. Criar/Configurar Usuário MySQL para auth_socket
 STEP="CREATE_USER"
-echo "--> 2/8: Executando script externo para criar o usuário MySQL '$MYSQL_PROFTPD_USER'@'$MYSQL_PROFTPD_HOST'..."
-echo "INFO: Certifique-se que a URL $CREATE_USER_SCRIPT_URL aponta para a versão corrigida do script."
+echo "--> 2/8: Executando script externo para criar/configurar o usuário MySQL '$MYSQL_PROFTPD_USER'@'$MYSQL_PROFTPD_HOST' com auth_socket..."
+echo "INFO: Certifique-se que a URL $CREATE_USER_SCRIPT_URL aponta para a versão CORRIGIDA do script (com permissão CREATE)."
 echo "INFO: O script externo pode solicitar a senha root do MySQL."
 bash <(curl -sSL "$CREATE_USER_SCRIPT_URL") \
     --mysql-user="$MYSQL_PROFTPD_USER" \
     --permission-level=default \
-    --mysql-password="$MYSQL_PROFTPD_PASSWORD" \
+    # --mysql-password="$MYSQL_PROFTPD_PASSWORD" \ # REMOVIDO
     --mysql-host="$MYSQL_PROFTPD_HOST" \
-    --database="$MYSQL_PROFTPD_DB"
+    --database="$MYSQL_PROFTPD_DB" \
+    --auth-plugin=auth_socket # ADICIONADO
 # Nota: A verificação de erro aqui é limitada
-echo "Usuário MySQL '$MYSQL_PROFTPD_USER'@'$MYSQL_PROFTPD_HOST' (provavelmente) criado. Verifique a saída acima."
+echo "Usuário MySQL '$MYSQL_PROFTPD_USER'@'$MYSQL_PROFTPD_HOST' (provavelmente) criado/configurado com auth_socket. Verifique a saída acima."
 
 # 3. Criar Banco de Dados MySQL
 STEP="CREATE_DB"
@@ -173,15 +174,16 @@ mysql -u root -e "CREATE DATABASE IF NOT EXISTS \`$MYSQL_PROFTPD_DB\`;"
 check_error "mysql create database"
 echo "Banco de dados '$MYSQL_PROFTPD_DB' criado (ou já existia)."
 
-# 4. Importar Schema SQL
+# 4. Importar Schema SQL (como root do MySQL)
 STEP="IMPORT_SQL"
-echo "--> 4/8: Importando schema SQL para o banco de dados '$MYSQL_PROFTPD_DB'..."
+echo "--> 4/8: Importando schema SQL para o banco de dados '$MYSQL_PROFTPD_DB' (usando root do MySQL)..."
 SQL_CONTENT=$(curl -sSL "$SQL_SCHEMA_URL")
 if [ $? -ne 0 ] || [ -z "$SQL_CONTENT" ]; then
     echo "ERRO: Falha ao baixar o schema SQL de '$SQL_SCHEMA_URL'."
     exit 1
 fi
-echo "$SQL_CONTENT" | mysql -u "$MYSQL_PROFTPD_USER" -p"$MYSQL_PROFTPD_PASSWORD" -h "$MYSQL_PROFTPD_HOST" "$MYSQL_PROFTPD_DB"
+# Importando como root do MySQL, que pode se autenticar via socket quando o script roda com sudo.
+echo "$SQL_CONTENT" | mysql -u root "$MYSQL_PROFTPD_DB"
 check_error "mysql import schema"
 echo "Schema SQL importado com sucesso."
 
@@ -203,16 +205,15 @@ for file in "${CONFIG_FILES[@]}"; do
 done
 echo "Arquivos de configuração baixados e aplicados."
 
-# 6. Ajustar SQLConnectInfo em sql.conf *** NOVA ETAPA ***
+# 6. Ajustar SQLConnectInfo em sql.conf para auth_socket *** MODIFICADO ***
 STEP="ADJUST_SQLCONF"
-echo "--> 6/8: Ajustando SQLConnectInfo em ${PROFTPD_CONFIG_DIR}/sql.conf..."
+echo "--> 6/8: Ajustando SQLConnectInfo em ${PROFTPD_CONFIG_DIR}/sql.conf para usar auth_socket (sem senha)..."
 SQL_CONF_FILE="${PROFTPD_CONFIG_DIR}/sql.conf"
 if [[ -f "$SQL_CONF_FILE" ]]; then
-    # Usa # como delimitador para sed, mais seguro se a senha contiver / ou outros caracteres especiais
-    # Substitui toda a linha começando com SQLConnectInfo
-    sed -i "s#^SQLConnectInfo\s+.*#SQLConnectInfo ${MYSQL_PROFTPD_DB}@${MYSQL_PROFTPD_HOST} ${MYSQL_PROFTPD_USER} ${MYSQL_PROFTPD_PASSWORD}#" "$SQL_CONF_FILE"
-    check_error "sed adjust sql.conf"
-    echo "SQLConnectInfo atualizado com sucesso."
+    # Substitui toda a linha começando com SQLConnectInfo para ter APENAS db@host user
+    sed -i "s#^SQLConnectInfo\s+.*#SQLConnectInfo ${MYSQL_PROFTPD_DB}@${MYSQL_PROFTPD_HOST} ${MYSQL_PROFTPD_USER}#" "$SQL_CONF_FILE"
+    check_error "sed adjust sql.conf (auth_socket)"
+    echo "SQLConnectInfo atualizado para auth_socket."
 else
     # Se o sql.conf não foi baixado por algum motivo, isso é um erro crítico.
     echo "ERRO CRÍTICO: Arquivo '$SQL_CONF_FILE' não encontrado para ajuste."
@@ -237,14 +238,16 @@ STEP="DONE"
 
 # --- Finalização ---
 echo ""
-echo "--- Configuração e Reinício do ProFTPD concluídos! ---"
+echo "--- Configuração e Reinício do ProFTPD concluídos! (usando auth_socket) ---" # Atualizado
 echo ""
-echo "INFO: O arquivo '$SQL_CONF_FILE' foi atualizado automaticamente com as credenciais fornecidas:"
-echo "      SQLConnectInfo ${MYSQL_PROFTPD_DB}@${MYSQL_PROFTPD_HOST} ${MYSQL_PROFTPD_USER} [SENHA OCULTA]"
+echo "INFO: O arquivo '$SQL_CONF_FILE' foi atualizado automaticamente para conexão via auth_socket (sem senha):" # Atualizado
+echo "      SQLConnectInfo ${MYSQL_PROFTPD_DB}@${MYSQL_PROFTPD_HOST} ${MYSQL_PROFTPD_USER}" # Atualizado
 echo ""
 echo "Próximos passos recomendados:"
-echo "1. Certifique-se de que a senha fornecida para o usuário '$MYSQL_PROFTPD_USER' no MySQL é segura."
+# echo "1. Certifique-se de que a senha fornecida..." # REMOVIDO
+echo "1. Confirme que o ProFTPD está rodando como o usuário do SO correto (geralmente 'proftpd') para que o auth_socket funcione."
+echo "   (Verifique as diretivas 'User' e 'Group' em '$PROFTPD_CONFIG_DIR/proftpd.conf' ou arquivos incluídos)."
 echo "2. Verifique o status detalhado do serviço: sudo systemctl status $PROFTPD_SERVICE_NAME"
-echo "3. Monitore os logs em /var/log/proftpd/ para quaisquer avisos ou erros operacionais."
+echo "3. Monitore os logs em /var/log/proftpd/ e os logs de erro do MySQL (/var/log/mysql/error.log ou similar) para quaisquer avisos ou erros operacionais relacionados à autenticação SQL."
 
 exit 0
