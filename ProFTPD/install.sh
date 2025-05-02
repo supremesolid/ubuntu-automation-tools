@@ -3,7 +3,6 @@
 # === Variáveis Globais (serão preenchidas pelos argumentos obrigatórios) ===
 MYSQL_PROFTPD_USER=""
 MYSQL_PROFTPD_PASSWORD=""
-MYSQL_PROFTPD_HOST=""
 
 # === Constantes ===
 MYSQL_PROFTPD_DB="proftpd" 
@@ -63,10 +62,6 @@ while [[ $# -gt 0 ]]; do
             MYSQL_PROFTPD_PASSWORD="${1#*=}"
             shift
             ;;
-        --host=*)
-            MYSQL_PROFTPD_HOST="${1#*=}"
-            shift
-            ;;
         --help|-h)
             usage
             ;;
@@ -84,9 +79,6 @@ if [[ -z "$MYSQL_PROFTPD_USER" ]]; then
 fi
 if [[ -z "$MYSQL_PROFTPD_PASSWORD" ]]; then
     MISSING_ARGS+=("--password")
-fi
-if [[ -z "$MYSQL_PROFTPD_HOST" ]]; then
-    MISSING_ARGS+=("--host")
 fi
 
 if [[ ${#MISSING_ARGS[@]} -ne 0 ]]; then
@@ -137,7 +129,6 @@ echo "--- Iniciando a configuração do ProFTPD com MySQL ---"
 echo "Usando Configurações MySQL para ProFTPD:"
 echo "  Usuário: $MYSQL_PROFTPD_USER"
 echo "  Senha: [OCULTA]"
-echo "  Host:  $MYSQL_PROFTPD_HOST"
 echo "  DB:    $MYSQL_PROFTPD_DB"
 echo "--------------------------------------------------"
 
@@ -157,7 +148,7 @@ bash <(curl -sSL "$CREATE_USER_SCRIPT_URL") \
     --mysql-user="$MYSQL_PROFTPD_USER" \
     --permission-level=default \
     --mysql-password="$MYSQL_PROFTPD_PASSWORD" \
-    --mysql-host="$MYSQL_PROFTPD_HOST" \
+    --mysql-host="127.0.0.1" \
     --database="$MYSQL_PROFTPD_DB"
 # Nota: A verificação de erro aqui é limitada pela natureza do bash <()
 echo "Usuário MySQL '$MYSQL_PROFTPD_USER' (provavelmente) criado. Verifique a saída acima."
@@ -177,7 +168,7 @@ if [ $? -ne 0 ] || [ -z "$SQL_CONTENT" ]; then
     echo "ERRO: Falha ao baixar o schema SQL de '$SQL_SCHEMA_URL'."
     exit 1
 fi
-echo "$SQL_CONTENT" | mysql -u "$MYSQL_PROFTPD_USER" -p"$MYSQL_PROFTPD_PASSWORD" -h "$MYSQL_PROFTPD_HOST" "$MYSQL_PROFTPD_DB"
+echo "$SQL_CONTENT" | mysql -u "$MYSQL_PROFTPD_USER" -p"$MYSQL_PROFTPD_PASSWORD" -h "127.0.0.1" "$MYSQL_PROFTPD_DB"
 check_error "mysql import schema"
 echo "Schema SQL importado com sucesso."
 
@@ -219,7 +210,7 @@ echo ""
 echo "--- Configuração e Reinício do ProFTPD concluídos! ---"
 echo ""
 echo "Próximos passos recomendados:"
-echo "1. Revise os arquivos de configuração em '$PROFTPD_CONFIG_DIR', especialmente 'sql.conf' para garantir que as credenciais MySQL (usuário '$MYSQL_PROFTPD_USER', host '$MYSQL_PROFTPD_HOST', senha [OCULTA]) estejam corretas e seguras."
+echo "1. Revise os arquivos de configuração em '$PROFTPD_CONFIG_DIR', especialmente 'sql.conf' para garantir que as credenciais MySQL (usuário '$MYSQL_PROFTPD_USER', senha [OCULTA]) estejam corretas e seguras."
 echo "2. Certifique-se de que a senha fornecida para o usuário '$MYSQL_PROFTPD_USER' no MySQL é segura."
 echo "3. Verifique o status detalhado do serviço: sudo systemctl status $PROFTPD_SERVICE_NAME"
 echo "4. Monitore os logs em /var/log/proftpd/ para quaisquer avisos ou erros operacionais."
