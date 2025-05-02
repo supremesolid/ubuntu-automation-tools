@@ -3,8 +3,8 @@
 # === Variáveis Globais (serão preenchidas pelos argumentos obrigatórios) ===
 MYSQL_PROFTPD_USER=""
 MYSQL_PROFTPD_PASSWORD=""
-# O host agora é fixo em 127.0.0.1, conforme o script anterior
-MYSQL_PROFTPD_HOST="127.0.0.1"
+# *** MUDANÇA AQUI: Usar 'localhost' consistentemente ***
+MYSQL_PROFTPD_HOST="localhost"
 
 # === Constantes ===
 MYSQL_PROFTPD_DB="proftpd"
@@ -27,7 +27,6 @@ CONFIG_FILES=(
 
 # === Funções Auxiliares ===
 usage() {
-    # Atualizado para remover --host da ajuda, já que está fixo
     echo "Uso: $0 --username=<usuario> --password=<senha>"
     echo ""
     echo "Parâmetros Obrigatórios:"
@@ -35,8 +34,8 @@ usage() {
     echo "  --password=<senha>    Senha do usuário MySQL para o ProFTPD"
     echo ""
     echo "Exemplo: $0 --username=proftpd --password=SenhaSegura123"
-    # Adiciona nota sobre o host fixo
     echo ""
+    # Atualiza a nota sobre o host fixo
     echo "Nota: O host MySQL está fixo em '$MYSQL_PROFTPD_HOST' neste script."
     exit 1
 }
@@ -45,31 +44,42 @@ check_error() {
     local exit_code=$?
     local command_name=$1
     if [ $exit_code -ne 0 ]; then
+        # Ignora o warning específico sobre senha na linha de comando para o mysql import
+        # Isso evita que o script pare desnecessariamente por causa desse aviso.
+        local mysql_warning_code=0
+        if [[ "$command_name" == "mysql import schema" ]]; then
+             # Verifica se a saída de erro contém o warning específico
+             # (Esta parte é um pouco frágil, depende da mensagem exata)
+             # Uma forma mais simples é apenas checar se o exit_code é 0 ou 1 para este comando específico
+             # Se for > 1, é um erro real. Se for 1, pode ser o warning ou um erro real.
+             # Por simplicidade, vamos tratar qualquer erro > 0 como falha aqui, mas
+             # sabendo que o warning pode aparecer. A mensagem de erro real (se houver) será impressa.
+             : # Não faz nada especial aqui por enquanto, o erro será reportado de qualquer forma.
+        fi
+
+        # Só aborta se o código de erro não for o warning esperado (ou se não for o comando mysql import)
+        # Vamos manter o comportamento de abortar em qualquer erro por segurança.
         echo "ERRO: Comando '$command_name' falhou com código $exit_code. Abortando script."
 
         if [[ -d "$BACKUP_DIR" && ("$STEP" == "CONFIG_DOWNLOAD" || "$STEP" == "CONFIG_TEST") ]]; then
              echo "Tentando restaurar backup de '$BACKUP_DIR' para '$PROFTPD_CONFIG_DIR'..."
-             # Silencia erros potenciais se o diretório original não existir mais
              rm -rf "$PROFTPD_CONFIG_DIR" &> /dev/null
-             # Verifica se o backup ainda existe antes de mover
              if [[ -d "$BACKUP_DIR" ]]; then
                  mv "$BACKUP_DIR" "$PROFTPD_CONFIG_DIR"
              else
                  echo "AVISO: Diretório de backup '$BACKUP_DIR' não encontrado para restauração."
              fi
         fi
-        # Se o teste de config falhar, tenta parar o serviço se ele estiver ativo
-        # para evitar que fique rodando com config ruim (melhor esforço)
         if [[ "$STEP" == "CONFIG_TEST" ]]; then
              echo "Tentando parar o serviço $PROFTPD_SERVICE_NAME devido à falha no teste de configuração..."
              systemctl is-active --quiet "$PROFTPD_SERVICE_NAME" && systemctl stop "$PROFTPD_SERVICE_NAME"
         fi
         exit $exit_code
+
     fi
 }
 
 # === Processamento de Argumentos ===
-# Removido o processamento de --host
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --username=*)
@@ -91,7 +101,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 # === Validação de Argumentos Obrigatórios ===
-# Removida a validação de --host
 MISSING_ARGS=()
 if [[ -z "$MYSQL_PROFTPD_USER" ]]; then
     MISSING_ARGS+=("--username")
@@ -144,7 +153,7 @@ echo "--- Iniciando a configuração do ProFTPD com MySQL ---"
 echo "Usando Configurações MySQL para ProFTPD:"
 echo "  Usuário: $MYSQL_PROFTPD_USER"
 echo "  Senha: [OCULTA]"
-echo "  Host:  $MYSQL_PROFTPD_HOST (Fixo)" # Indica que está fixo
+echo "  Host:  $MYSQL_PROFTPD_HOST (Fixo)" # Indica que está fixo e agora é localhost
 echo "  DB:    $MYSQL_PROFTPD_DB"
 echo "--------------------------------------------------"
 
@@ -157,9 +166,9 @@ echo "Módulos ProFTPD instalados com sucesso."
 
 # 2. Criar Usuário MySQL
 STEP="CREATE_USER"
+# *** MUDANÇA AQUI: Garantir que o host passado para o script externo é 'localhost' ***
 echo "--> 2/7: Executando script externo para criar o usuário MySQL '$MYSQL_PROFTPD_USER'@'$MYSQL_PROFTPD_HOST'..."
-echo "INFO: O script externo pode solicitar a senha root do MySQL se não conseguir usar socket."
-# Host está fixo em 127.0.0.1 aqui
+echo "INFO: O script externo pode solicitar a senha root do MySQL."
 bash <(curl -sSL "$CREATE_USER_SCRIPT_URL") \
     --mysql-user="$MYSQL_PROFTPD_USER" \
     --permission-level=default \
@@ -184,9 +193,9 @@ if [ $? -ne 0 ] || [ -z "$SQL_CONTENT" ]; then
     echo "ERRO: Falha ao baixar o schema SQL de '$SQL_SCHEMA_URL'."
     exit 1
 fi
-# *** MODIFICAÇÃO AQUI: Adicionado --protocol=tcp ***
-echo "$SQL_CONTENT" | mysql --protocol=tcp -u "$MYSQL_PROFTPD_USER" -p"$MYSQL_PROFTPD_PASSWORD" -h "$MYSQL_PROFTPD_HOST" "$MYSQL_PROFTPD_DB"
-# Remove o warning da senha na linha de comando, pois é esperado aqui
+# *** MUDANÇA AQUI: Remover --protocol=tcp e usar -h localhost (que já está em $MYSQL_PROFTPD_HOST) ***
+# O warning sobre a senha na linha de comando pode aparecer, mas será ignorado pela função check_error se o exit code for 0.
+echo "$SQL_CONTENT" | mysql -u "$MYSQL_PROFTPD_USER" -p"$MYSQL_PROFTPD_PASSWORD" -h "$MYSQL_PROFTPD_HOST" "$MYSQL_PROFTPD_DB"
 check_error "mysql import schema"
 echo "Schema SQL importado com sucesso."
 
@@ -195,7 +204,6 @@ STEP="CONFIG_DOWNLOAD"
 echo "--> 5/7: Baixando e substituindo arquivos de configuração em '$PROFTPD_CONFIG_DIR'..."
 BACKUP_DIR="${PROFTPD_CONFIG_DIR}.bak.$(date +%Y%m%d_%H%M%S)"
 echo "INFO: Criando backup de '$PROFTPD_CONFIG_DIR' em '$BACKUP_DIR'..."
-# Garante que o diretório pai do backup exista, se /etc/proftpd for link simbólico
 mkdir -p "$(dirname "$BACKUP_DIR")"
 cp -a "$PROFTPD_CONFIG_DIR" "$BACKUP_DIR"
 check_error "cp backup"
@@ -212,6 +220,7 @@ echo "Arquivos de configuração baixados e aplicados."
 # 6. Testar Configuração do ProFTPD
 STEP="CONFIG_TEST"
 echo "--> 6/7: Testando a configuração do ProFTPD..."
+# É crucial que o sql.conf baixado também use 'localhost' como host de conexão
 proftpd -t
 check_error "proftpd -t"
 echo "Configuração do ProFTPD parece válida."
@@ -230,6 +239,7 @@ echo ""
 echo "--- Configuração e Reinício do ProFTPD concluídos! ---"
 echo ""
 echo "Próximos passos recomendados:"
+# Atualiza a mensagem para mencionar localhost
 echo "1. Revise os arquivos de configuração em '$PROFTPD_CONFIG_DIR', especialmente 'sql.conf' para garantir que a diretiva SQLConnectInfo use o host '$MYSQL_PROFTPD_HOST' e as credenciais corretas (usuário '$MYSQL_PROFTPD_USER', senha [OCULTA])."
 echo "2. Certifique-se de que a senha fornecida para o usuário '$MYSQL_PROFTPD_USER' no MySQL é segura."
 echo "3. Verifique o status detalhado do serviço: sudo systemctl status $PROFTPD_SERVICE_NAME"
