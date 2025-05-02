@@ -1,20 +1,16 @@
 #!/bin/bash
 
-# === Variáveis Globais (serão preenchidas pelos argumentos obrigatórios) ===
+# === Variáveis Globais ===
 MYSQL_PROFTPD_USER=""
-# MYSQL_PROFTPD_PASSWORD="" # Removido
 MYSQL_PROFTPD_HOST="localhost"
 
 # === Constantes ===
 MYSQL_PROFTPD_DB="proftpd"
 PROFTPD_CONFIG_DIR="/etc/proftpd"
-# URL do script de criação de usuário
 CREATE_USER_SCRIPT_URL="https://supremesolid.github.io/ubuntu-automation-tools/MySQL/create-user.sh"
-# Nome temporário para o script baixado
-CREATE_USER_SCRIPT_LOCAL="/tmp/create-user-temp.sh"
 SQL_SCHEMA_URL="https://supremesolid.github.io/ubuntu-automation-tools/ProFTPD/proftpd.sql"
 CONFIG_BASE_URL="https://supremesolid.github.io/ubuntu-automation-tools/ProFTPD/configs"
-PROFTPD_SERVICE_NAME="proftpd" # Nome do serviço
+PROFTPD_SERVICE_NAME="proftpd" 
 CONFIG_FILES=(
     "geoip.conf"
     "ldap.conf"
@@ -46,30 +42,13 @@ check_error() {
     if [ $exit_code -ne 0 ]; then
         echo "ERRO: Comando '$command_name' falhou com código $exit_code. Abortando script."
 
-        if [[ -d "$BACKUP_DIR" && ("$STEP" == "CONFIG_DOWNLOAD" || "$STEP" == "ADJUST_SQLCONF" || "$STEP" == "CONFIG_TEST") ]]; then
-             echo "Tentando restaurar backup de '$BACKUP_DIR' para '$PROFTPD_CONFIG_DIR'..."
-             rm -rf "$PROFTPD_CONFIG_DIR" &> /dev/null
-             if [[ -d "$BACKUP_DIR" ]]; then
-                 mv "$BACKUP_DIR" "$PROFTPD_CONFIG_DIR"
-             else
-                 echo "AVISO: Diretório de backup '$BACKUP_DIR' não encontrado para restauração."
-             fi
-        fi
         if [[ "$STEP" == "CONFIG_TEST" ]]; then
              echo "Tentando parar o serviço $PROFTPD_SERVICE_NAME devido à falha no teste de configuração..."
              systemctl is-active --quiet "$PROFTPD_SERVICE_NAME" && systemctl stop "$PROFTPD_SERVICE_NAME"
         fi
-        # Limpa o script temporário se existir
-        [[ -f "$CREATE_USER_SCRIPT_LOCAL" ]] && rm -f "$CREATE_USER_SCRIPT_LOCAL"
         exit $exit_code
     fi
 }
-
-# Função de limpeza para garantir que o script temporário seja removido
-cleanup() {
-  [[ -f "$CREATE_USER_SCRIPT_LOCAL" ]] && rm -f "$CREATE_USER_SCRIPT_LOCAL"
-}
-trap cleanup EXIT # Chama cleanup ao sair do script (normal ou erro)
 
 # === Processamento de Argumentos ===
 while [[ $# -gt 0 ]]; do
@@ -107,7 +86,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # Verifica dependências
-for cmd in mysql curl proftpd systemctl sed bash; do # Adicionado bash
+for cmd in mysql curl proftpd systemctl sed; do
     if ! command -v $cmd &> /dev/null; then
         echo "INFO: Comando '$cmd' não encontrado. Tentando instalar dependências..."
         apt update > /dev/null
@@ -118,11 +97,10 @@ for cmd in mysql curl proftpd systemctl sed bash; do # Adicionado bash
             proftpd)    pkg="proftpd-core" ;;
             systemctl)  pkg="systemd" ;;
             sed)        pkg="sed" ;;
-            bash)       pkg="bash" ;; # Geralmente presente
             *)          echo "ERRO: Dependência desconhecida '$cmd'"; exit 1 ;;
         esac
         # Instala apenas se não for um pacote base ou se realmente não estiver presente
-        if [[ "$pkg" != "systemd" && "$pkg" != "sed" && "$pkg" != "bash" ]] || ! command -v $cmd &>/dev/null; then
+        if [[ "$pkg" != "systemd" && "$pkg" != "sed" ]] || ! command -v $cmd &>/dev/null; then
              echo "Instalando $pkg..."
              apt install -y "$pkg"
              check_error "apt install $pkg"
@@ -146,53 +124,37 @@ echo "--------------------------------------------------"
 
 # 1. Instalar Módulos Específicos do ProFTPD
 STEP="INSTALL_MODULES"
-echo "--> 1/8: Instalando módulos ProFTPD (mysql, crypto, ldap)..."
+echo "--> 1/7: Instalando módulos ProFTPD (mysql, crypto, ldap)..."
 apt install -y proftpd-mod-mysql proftpd-mod-crypto proftpd-mod-ldap
 check_error "apt install proftpd-mods"
 echo "Módulos ProFTPD instalados com sucesso."
 
-# 2. Baixar e Executar Script de Criação de Usuário *** MODIFICADO ***
+# 2. Executar Script Remoto de Criação de Usuário *** REVERTIDO ***
 STEP="CREATE_USER"
-echo "--> 2/8: Baixando script de criação de usuário de $CREATE_USER_SCRIPT_URL..."
-curl -sSL -o "$CREATE_USER_SCRIPT_LOCAL" "$CREATE_USER_SCRIPT_URL"
-check_error "curl download create-user.sh"
-
-# Verifica se o download foi bem-sucedido e o arquivo não está vazio
-if [[ ! -s "$CREATE_USER_SCRIPT_LOCAL" ]]; then
-    echo "ERRO CRÍTICO: Falha ao baixar ou script baixado está vazio: $CREATE_USER_SCRIPT_LOCAL"
-    check_error "download create-user.sh failed"
-fi
-
-echo "--> 2/8: Tornando script local ($CREATE_USER_SCRIPT_LOCAL) executável..."
-chmod +x "$CREATE_USER_SCRIPT_LOCAL"
-check_error "chmod +x $CREATE_USER_SCRIPT_LOCAL"
-
-echo "--> 2/8: Executando script local para criar/configurar o usuário MySQL '$MYSQL_PROFTPD_USER'@'$MYSQL_PROFTPD_HOST' com auth_socket..."
+echo "--> 2/7: Executando script remoto para criar/configurar o usuário MySQL '$MYSQL_PROFTPD_USER'@'$MYSQL_PROFTPD_HOST' com auth_socket..."
+echo "INFO: Certifique-se que a URL $CREATE_USER_SCRIPT_URL aponta para a versão CORRIGIDA do script (com permissão CREATE)."
 echo "INFO: O script externo pode solicitar a senha root do MySQL."
-# Executa o script local baixado com bash
-bash "$CREATE_USER_SCRIPT_LOCAL" \
+# Executa diretamente o script baixado via curl
+bash <(curl -sSL "$CREATE_USER_SCRIPT_URL") \
     --mysql-user="$MYSQL_PROFTPD_USER" \
     --permission-level=default \
     --mysql-host="$MYSQL_PROFTPD_HOST" \
     --database="$MYSQL_PROFTPD_DB" \
     --auth-plugin=auth_socket
-check_error "execute $CREATE_USER_SCRIPT_LOCAL" # Verifica o código de saída do script
-
-# Limpa o script temporário após execução bem-sucedida
-rm -f "$CREATE_USER_SCRIPT_LOCAL"
+check_error "execute remote create-user.sh" 
 
 echo "Usuário MySQL '$MYSQL_PROFTPD_USER'@'$MYSQL_PROFTPD_HOST' (provavelmente) criado/configurado com auth_socket. Verifique a saída acima."
 
 # 3. Criar Banco de Dados MySQL
 STEP="CREATE_DB"
-echo "--> 3/8: Criando o banco de dados MySQL '$MYSQL_PROFTPD_DB' (como root, assumindo auth via socket)..."
+echo "--> 3/7: Criando o banco de dados MySQL '$MYSQL_PROFTPD_DB' (como root, assumindo auth via socket)..."
 mysql -u root -e "CREATE DATABASE IF NOT EXISTS \`$MYSQL_PROFTPD_DB\`;"
 check_error "mysql create database"
 echo "Banco de dados '$MYSQL_PROFTPD_DB' criado (ou já existia)."
 
 # 4. Importar Schema SQL (como root do MySQL)
 STEP="IMPORT_SQL"
-echo "--> 4/8: Importando schema SQL para o banco de dados '$MYSQL_PROFTPD_DB' (usando root do MySQL)..."
+echo "--> 4/7: Importando schema SQL para o banco de dados '$MYSQL_PROFTPD_DB' (usando root do MySQL)..."
 SQL_CONTENT=$(curl -sSL "$SQL_SCHEMA_URL")
 if [ $? -ne 0 ] || [ -z "$SQL_CONTENT" ]; then
     echo "ERRO: Falha ao baixar o schema SQL de '$SQL_SCHEMA_URL'."
@@ -202,14 +164,13 @@ echo "$SQL_CONTENT" | mysql -u root "$MYSQL_PROFTPD_DB"
 check_error "mysql import schema"
 echo "Schema SQL importado com sucesso."
 
-# 5. Baixar e Aplicar Arquivos de Configuração
+# 5. Baixar e Aplicar Arquivos de Configuração (Sem Backup)
 STEP="CONFIG_DOWNLOAD"
-echo "--> 5/8: Baixando e substituindo arquivos de configuração em '$PROFTPD_CONFIG_DIR'..."
-BACKUP_DIR="${PROFTPD_CONFIG_DIR}.bak.$(date +%Y%m%d_%H%M%S)"
-echo "INFO: Criando backup de '$PROFTPD_CONFIG_DIR' em '$BACKUP_DIR'..."
-mkdir -p "$(dirname "$BACKUP_DIR")"
-cp -a "$PROFTPD_CONFIG_DIR" "$BACKUP_DIR"
-check_error "cp backup"
+echo "--> 5/7: Baixando e substituindo arquivos de configuração em '$PROFTPD_CONFIG_DIR'..."
+
+# Garante que o diretório de destino existe
+mkdir -p "$PROFTPD_CONFIG_DIR"
+check_error "mkdir -p $PROFTPD_CONFIG_DIR"
 
 for file in "${CONFIG_FILES[@]}"; do
     TARGET_FILE="$PROFTPD_CONFIG_DIR/$file"
@@ -222,7 +183,7 @@ echo "Arquivos de configuração baixados e aplicados."
 
 # 6. Ajustar SQLConnectInfo em sql.conf para auth_socket
 STEP="ADJUST_SQLCONF"
-echo "--> 6/8: Ajustando SQLConnectInfo em ${PROFTPD_CONFIG_DIR}/sql.conf para usar auth_socket (sem senha)..."
+echo "--> 6/7: Ajustando SQLConnectInfo em ${PROFTPD_CONFIG_DIR}/sql.conf para usar auth_socket (sem senha)..."
 SQL_CONF_FILE="${PROFTPD_CONFIG_DIR}/sql.conf"
 if [[ -f "$SQL_CONF_FILE" ]]; then
     sed -i "s#^SQLConnectInfo\s+.*#SQLConnectInfo ${MYSQL_PROFTPD_DB}@${MYSQL_PROFTPD_HOST} ${MYSQL_PROFTPD_USER}#" "$SQL_CONF_FILE"
@@ -233,24 +194,23 @@ else
     check_error "$SQL_CONF_FILE not found"
 fi
 
-# 7. Testar Configuração do ProFTPD
-STEP="CONFIG_TEST"
-echo "--> 7/8: Testando a configuração do ProFTPD..."
+# 7. Testar Configuração do ProFTPD e Reiniciar Serviço
+STEP="CONFIG_TEST_RESTART"
+echo "--> 7/7: Testando a configuração e reiniciando o serviço ProFTPD..."
+
+echo "   Testando configuração..."
 proftpd -t
 check_error "proftpd -t"
-echo "Configuração do ProFTPD parece válida."
+echo "   Configuração do ProFTPD parece válida."
 
-# 8. Reiniciar Serviço ProFTPD
-STEP="RESTART_SERVICE"
-echo "--> 8/8: Reiniciando o serviço ProFTPD (${PROFTPD_SERVICE_NAME})..."
+echo "   Reiniciando o serviço ProFTPD (${PROFTPD_SERVICE_NAME})..."
 systemctl restart "$PROFTPD_SERVICE_NAME"
 check_error "systemctl restart $PROFTPD_SERVICE_NAME"
-echo "Serviço ProFTPD reiniciado com sucesso."
+echo "   Serviço ProFTPD reiniciado com sucesso."
 
 STEP="DONE"
 
 # --- Finalização ---
-# A função cleanup removerá o script temporário automaticamente
 echo ""
 echo "--- Configuração e Reinício do ProFTPD concluídos! (usando auth_socket) ---"
 echo ""
