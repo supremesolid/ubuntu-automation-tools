@@ -3,14 +3,16 @@
 # === Variáveis Globais (serão preenchidas pelos argumentos obrigatórios) ===
 MYSQL_PROFTPD_USER=""
 MYSQL_PROFTPD_PASSWORD=""
+# O host agora é fixo em 127.0.0.1, conforme o script anterior
+MYSQL_PROFTPD_HOST="127.0.0.1"
 
 # === Constantes ===
-MYSQL_PROFTPD_DB="proftpd" 
+MYSQL_PROFTPD_DB="proftpd"
 PROFTPD_CONFIG_DIR="/etc/proftpd"
 CREATE_USER_SCRIPT_URL="https://supremesolid.github.io/ubuntu-automation-tools/MySQL/create-user.sh"
 SQL_SCHEMA_URL="https://supremesolid.github.io/ubuntu-automation-tools/ProFTPD/proftpd.sql"
 CONFIG_BASE_URL="https://supremesolid.github.io/ubuntu-automation-tools/ProFTPD/configs"
-PROFTPD_SERVICE_NAME="proftpd" # Nome do serviço pode variar em alguns sistemas, mas geralmente é este
+PROFTPD_SERVICE_NAME="proftpd" # Nome do serviço
 CONFIG_FILES=(
     "geoip.conf"
     "ldap.conf"
@@ -25,33 +27,49 @@ CONFIG_FILES=(
 
 # === Funções Auxiliares ===
 usage() {
-    echo "Uso: $0 --username=<usuario> --password=<senha> --host=<host>"
+    # Atualizado para remover --host da ajuda, já que está fixo
+    echo "Uso: $0 --username=<usuario> --password=<senha>"
     echo ""
     echo "Parâmetros Obrigatórios:"
     echo "  --username=<usuario>  Nome do usuário MySQL para o ProFTPD"
     echo "  --password=<senha>    Senha do usuário MySQL para o ProFTPD"
-    echo "  --host=<host>         Host do servidor MySQL (ex: 127.0.0.1, localhost)"
     echo ""
-    echo "Exemplo: $0 --username=proftpd --password=SenhaSegura123 --host=127.0.0.1"
+    echo "Exemplo: $0 --username=proftpd --password=SenhaSegura123"
+    # Adiciona nota sobre o host fixo
+    echo ""
+    echo "Nota: O host MySQL está fixo em '$MYSQL_PROFTPD_HOST' neste script."
     exit 1
 }
 
 check_error() {
     local exit_code=$?
-    local command_name=$1 
+    local command_name=$1
     if [ $exit_code -ne 0 ]; then
         echo "ERRO: Comando '$command_name' falhou com código $exit_code. Abortando script."
-       
-        if [[ -d "$BACKUP_DIR" && "$STEP" == "CONFIG_DOWNLOAD" ]]; then
+
+        if [[ -d "$BACKUP_DIR" && ("$STEP" == "CONFIG_DOWNLOAD" || "$STEP" == "CONFIG_TEST") ]]; then
              echo "Tentando restaurar backup de '$BACKUP_DIR' para '$PROFTPD_CONFIG_DIR'..."
+             # Silencia erros potenciais se o diretório original não existir mais
              rm -rf "$PROFTPD_CONFIG_DIR" &> /dev/null
-             mv "$BACKUP_DIR" "$PROFTPD_CONFIG_DIR"
+             # Verifica se o backup ainda existe antes de mover
+             if [[ -d "$BACKUP_DIR" ]]; then
+                 mv "$BACKUP_DIR" "$PROFTPD_CONFIG_DIR"
+             else
+                 echo "AVISO: Diretório de backup '$BACKUP_DIR' não encontrado para restauração."
+             fi
+        fi
+        # Se o teste de config falhar, tenta parar o serviço se ele estiver ativo
+        # para evitar que fique rodando com config ruim (melhor esforço)
+        if [[ "$STEP" == "CONFIG_TEST" ]]; then
+             echo "Tentando parar o serviço $PROFTPD_SERVICE_NAME devido à falha no teste de configuração..."
+             systemctl is-active --quiet "$PROFTPD_SERVICE_NAME" && systemctl stop "$PROFTPD_SERVICE_NAME"
         fi
         exit $exit_code
     fi
 }
 
 # === Processamento de Argumentos ===
+# Removido o processamento de --host
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --username=*)
@@ -73,6 +91,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # === Validação de Argumentos Obrigatórios ===
+# Removida a validação de --host
 MISSING_ARGS=()
 if [[ -z "$MYSQL_PROFTPD_USER" ]]; then
     MISSING_ARGS+=("--username")
@@ -98,24 +117,20 @@ fi
 for cmd in mysql curl proftpd systemctl; do
     if ! command -v $cmd &> /dev/null; then
         echo "INFO: Comando '$cmd' não encontrado. Tentando instalar dependências..."
-        # Silenciar saída do apt update para limpeza
         apt update > /dev/null
         check_error "apt update"
-        # Instala o pacote necessário (pode precisar de ajustes se o nome do pacote for diferente)
         case $cmd in
             mysql)      pkg="mysql-client" ;;
             curl)       pkg="curl" ;;
-            proftpd)    pkg="proftpd-core" ;; # Instala o core se proftpd -t não for encontrado
-            systemctl)  pkg="systemd" ;; # Normalmente já presente
+            proftpd)    pkg="proftpd-core" ;;
+            systemctl)  pkg="systemd" ;;
             *)          echo "ERRO: Dependência desconhecida '$cmd'"; exit 1 ;;
         esac
-        # Evita reinstalar systemd desnecessariamente
         if [[ "$pkg" != "systemd" ]] || ! systemctl --version &>/dev/null; then
              echo "Instalando $pkg..."
              apt install -y "$pkg"
              check_error "apt install $pkg"
         fi
-
         if ! command -v $cmd &> /dev/null; then
             echo "ERRO: Falha ao instalar ou encontrar o comando '$cmd' após a instalação."
             exit 1
@@ -129,29 +144,30 @@ echo "--- Iniciando a configuração do ProFTPD com MySQL ---"
 echo "Usando Configurações MySQL para ProFTPD:"
 echo "  Usuário: $MYSQL_PROFTPD_USER"
 echo "  Senha: [OCULTA]"
+echo "  Host:  $MYSQL_PROFTPD_HOST (Fixo)" # Indica que está fixo
 echo "  DB:    $MYSQL_PROFTPD_DB"
 echo "--------------------------------------------------"
 
 # 1. Instalar Módulos Específicos do ProFTPD
 STEP="INSTALL_MODULES"
 echo "--> 1/7: Instalando módulos ProFTPD (mysql, crypto, ldap)..."
-# apt update já foi feito na checagem de dependências se necessário
 apt install -y proftpd-mod-mysql proftpd-mod-crypto proftpd-mod-ldap
 check_error "apt install proftpd-mods"
 echo "Módulos ProFTPD instalados com sucesso."
 
 # 2. Criar Usuário MySQL
 STEP="CREATE_USER"
-echo "--> 2/7: Executando script externo para criar o usuário MySQL '$MYSQL_PROFTPD_USER'..."
+echo "--> 2/7: Executando script externo para criar o usuário MySQL '$MYSQL_PROFTPD_USER'@'$MYSQL_PROFTPD_HOST'..."
 echo "INFO: O script externo pode solicitar a senha root do MySQL se não conseguir usar socket."
+# Host está fixo em 127.0.0.1 aqui
 bash <(curl -sSL "$CREATE_USER_SCRIPT_URL") \
     --mysql-user="$MYSQL_PROFTPD_USER" \
     --permission-level=default \
     --mysql-password="$MYSQL_PROFTPD_PASSWORD" \
-    --mysql-host="127.0.0.1" \
+    --mysql-host="$MYSQL_PROFTPD_HOST" \
     --database="$MYSQL_PROFTPD_DB"
-# Nota: A verificação de erro aqui é limitada pela natureza do bash <()
-echo "Usuário MySQL '$MYSQL_PROFTPD_USER' (provavelmente) criado. Verifique a saída acima."
+# Nota: A verificação de erro aqui é limitada
+echo "Usuário MySQL '$MYSQL_PROFTPD_USER'@'$MYSQL_PROFTPD_HOST' (provavelmente) criado. Verifique a saída acima."
 
 # 3. Criar Banco de Dados MySQL
 STEP="CREATE_DB"
@@ -168,7 +184,9 @@ if [ $? -ne 0 ] || [ -z "$SQL_CONTENT" ]; then
     echo "ERRO: Falha ao baixar o schema SQL de '$SQL_SCHEMA_URL'."
     exit 1
 fi
-echo "$SQL_CONTENT" | mysql -u "$MYSQL_PROFTPD_USER" -p"$MYSQL_PROFTPD_PASSWORD" -h "127.0.0.1" "$MYSQL_PROFTPD_DB"
+# *** MODIFICAÇÃO AQUI: Adicionado --protocol=tcp ***
+echo "$SQL_CONTENT" | mysql --protocol=tcp -u "$MYSQL_PROFTPD_USER" -p"$MYSQL_PROFTPD_PASSWORD" -h "$MYSQL_PROFTPD_HOST" "$MYSQL_PROFTPD_DB"
+# Remove o warning da senha na linha de comando, pois é esperado aqui
 check_error "mysql import schema"
 echo "Schema SQL importado com sucesso."
 
@@ -177,6 +195,8 @@ STEP="CONFIG_DOWNLOAD"
 echo "--> 5/7: Baixando e substituindo arquivos de configuração em '$PROFTPD_CONFIG_DIR'..."
 BACKUP_DIR="${PROFTPD_CONFIG_DIR}.bak.$(date +%Y%m%d_%H%M%S)"
 echo "INFO: Criando backup de '$PROFTPD_CONFIG_DIR' em '$BACKUP_DIR'..."
+# Garante que o diretório pai do backup exista, se /etc/proftpd for link simbólico
+mkdir -p "$(dirname "$BACKUP_DIR")"
 cp -a "$PROFTPD_CONFIG_DIR" "$BACKUP_DIR"
 check_error "cp backup"
 
@@ -210,7 +230,7 @@ echo ""
 echo "--- Configuração e Reinício do ProFTPD concluídos! ---"
 echo ""
 echo "Próximos passos recomendados:"
-echo "1. Revise os arquivos de configuração em '$PROFTPD_CONFIG_DIR', especialmente 'sql.conf' para garantir que as credenciais MySQL (usuário '$MYSQL_PROFTPD_USER', senha [OCULTA]) estejam corretas e seguras."
+echo "1. Revise os arquivos de configuração em '$PROFTPD_CONFIG_DIR', especialmente 'sql.conf' para garantir que a diretiva SQLConnectInfo use o host '$MYSQL_PROFTPD_HOST' e as credenciais corretas (usuário '$MYSQL_PROFTPD_USER', senha [OCULTA])."
 echo "2. Certifique-se de que a senha fornecida para o usuário '$MYSQL_PROFTPD_USER' no MySQL é segura."
 echo "3. Verifique o status detalhado do serviço: sudo systemctl status $PROFTPD_SERVICE_NAME"
 echo "4. Monitore os logs em /var/log/proftpd/ para quaisquer avisos ou erros operacionais."
