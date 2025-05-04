@@ -13,8 +13,6 @@ lxc import "$FILE"
 
 echo "Adicionando diretórios montados..."
 mkdir -p /docker/mtasa /home/mtasa
-lxc config device add mtasa folder_docker disk source=/docker/mtasa path=/docker/mtasa
-lxc config device add mtasa folder_home disk source=/home/mtasa path=/home/mtasa
 
 echo "Removendo arquivo temporário..."
 rm -f "$FILE"
