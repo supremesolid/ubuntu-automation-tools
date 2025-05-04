@@ -17,9 +17,6 @@ mkdir -p /docker/mtasa /home/mtasa
 echo "Removendo arquivo temporário..."
 rm -f "$FILE"
 
-echo "Configurando IP fixo (opcional)..."
-lxc config device override mtasa eth0 ipv4.address=10.0.0.2
-
 echo "Iniciando container..."
 lxc start mtasa
 
