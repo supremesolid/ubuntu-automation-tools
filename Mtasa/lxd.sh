@@ -8,11 +8,11 @@ URL="https://github.com/supremesolid/ubuntu-automation-tools/raw/master/LXD/mtas
 echo "Baixando imagem..."
 wget -O "$FILE" "$URL"
 
-echo "Importando backup do container..."
-lxc import "$FILE"
-
 echo "Adicionando diretórios montados..."
 mkdir -p /docker/mtasa /home/mtasa
+
+echo "Importando backup do container..."
+lxc import "$FILE"
 
 echo "Removendo arquivo temporário..."
 rm -f "$FILE"
