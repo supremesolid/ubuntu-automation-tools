@@ -7,6 +7,7 @@ set -euo pipefail
 readonly NGINX_SITES_AVAILABLE="/etc/nginx/sites-available"
 readonly NGINX_SITES_ENABLED="/etc/nginx/sites-enabled"
 readonly NGINX_LOG_DIR="/var/log/nginx"
+readonly KEEPALIVE_COUNT=32 # Valor do Keepalive para o upstream
 
 # === Cores para Terminal ===
 GREEN="\e[32m"
@@ -30,15 +31,16 @@ info() { echo -e "${BLUE}[ℹ]${RESET} $1"; }
 usage() {
   echo -e "${YELLOW}Uso:${RESET} $0 --vhost-server-ip=<IP> --vhost-server-port=<PORTA> --vhost-server-domain=<DOMAIN> --vhost-proxy-target=<TARGET> [--vhost-proxy-ssl=<yes|no>]"
   echo ""
-  echo "Cria um VirtualHost Nginx com proxy reverso para um serviço web (ex: painel MTASA, API, etc.)."
+  echo "Cria um VirtualHost Nginx com proxy reverso e upstream keepalive para um serviço web (ex: painel MTASA, API, etc.)."
   echo ""
   echo -e "${BLUE}Opções:${RESET}"
-  echo "  --vhost-server-ip=<IP>         Endereço IP para o Nginx escutar (ex: 0.0.0.0)."
-  echo "  --vhost-server-port=<PORTA>    Porta para o Nginx escutar (ex: 443, 80)."
-  echo "  --vhost-server-domain=<DOMAIN> Nome do domínio ou subdomínio (ex: status.meudominio.com)."
-  echo "  --vhost-proxy-target=<TARGET>  Alvo do proxy (IP:PORTA ou HOST:PORTA do serviço web)."
+  echo "  --vhost-server-ip=<IP>         Endereço IP para o Nginx escutar (ex: 0.0.0.0, 192.168.0.230)."
+  echo "  --vhost-server-port=<PORTA>    Porta para o Nginx escutar (ex: 80, 443)."
+  echo "  --vhost-server-domain=<DOMAIN> Nome do domínio ou subdomínio (ex: mta-admin.meudominio.com)."
+  echo "  --vhost-proxy-target=<TARGET>  Alvo do proxy (IP:PORTA do serviço web backend)."
   echo "                                 ${YELLOW}ATENÇÃO:${RESET} Use a porta do serviço ${YELLOW}HTTP/HTTPS${RESET}, não a porta UDP do jogo/query!"
   echo "  --vhost-proxy-ssl=<yes|no>     O serviço alvo (backend) usa HTTPS? (Padrão: no)."
+  echo "                                 Se 'yes', adiciona config para validar SSL (proxy_ssl_verify off)."
   echo "  -h, --help                     Exibe esta mensagem de ajuda."
   exit 0
 }
@@ -75,11 +77,15 @@ validate_port() {
 # Valida formato do domínio (básico)
 validate_domain() {
   local domain="${1}"
+  # Regex um pouco mais permissiva para domínios locais/internos se necessário, mas mantendo padrão geral
   local domain_regex='^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$'
   if ! [[ "${domain}" =~ ${domain_regex} ]]; then
-    error_exit "Formato de domínio inválido: ${domain}"
+      # Tenta validar como IP (para casos de teste sem domínio real)
+      validate_ipv4 "${domain}" || error_exit "Formato de domínio inválido: ${domain}"
+      warn "Usando endereço IP '${domain}' como server_name. Para produção, use um nome de domínio válido."
   fi
 }
+
 
 # Valida formato do alvo do proxy (básico)
 validate_proxy_target() {
@@ -87,15 +93,18 @@ validate_proxy_target() {
   if [[ -z "$target" ]]; then
     error_exit "Alvo do proxy (--vhost-proxy-target) não pode ser vazio."
   fi
-  # Validação simples, Nginx fará a validação final.
-  # Ex: verifica se contém ':' para host:port ou IP:port
-  if ! [[ "$target" =~ : || "$target" =~ ^unix: ]]; then
-     error_exit "Formato do alvo do proxy '--vhost-proxy-target=${target}' inválido. Deve ser no formato IP:PORTA ou HOST:PORTA."
+  # Validação simples: IP:PORTA ou HOST:PORTA
+  local target_regex='^([a-zA-Z0-9.-]+):([0-9]{1,5})$'
+  if ! [[ "$target" =~ $target_regex ]]; then
+     error_exit "Formato do alvo do proxy '--vhost-proxy-target=${target}' inválido. Deve ser no formato IP:PORTA ou HOSTNAME:PORTA."
   fi
+  local target_port="${BASH_REMATCH[2]}"
+  validate_port "$target_port" # Valida a porta extraída
+
   # Aviso específico sobre portas comuns de MTASA UDP
-  if [[ "$target" =~ :(22003|22005|22126)$ ]]; then
-      warn "A porta no alvo do proxy (${target}) parece ser uma porta padrão UDP do MTASA (jogo, query, http server list)."
-      warn "Este script configura um proxy HTTP/HTTPS. Certifique-se de que '${target}' é realmente um serviço web (HTTP/HTTPS)."
+  if [[ "$target_port" == "22003" || "$target_port" == "22005" || "$target_port" == "22126" ]]; then
+      warn "A porta ${target_port} no alvo do proxy (${target}) é frequentemente usada para protocolos ${YELLOW}UDP${RESET} no MTASA (jogo, query, http server list)."
+      warn "Este script configura um proxy ${YELLOW}HTTP/HTTPS${RESET}. Certifique-se de que '${target}' é realmente um serviço web respondendo via HTTP/HTTPS nessa porta."
   fi
 }
 
@@ -126,7 +135,7 @@ VHOST_SERVER_IP=""
 VHOST_SERVER_PORT=""
 VHOST_SERVER_DOMAIN=""
 VHOST_PROXY_TARGET=""
-VHOST_PROXY_SSL="no" # Valor padrão alterado para 'no'
+VHOST_PROXY_SSL="no" # Valor padrão
 
 # Se nenhum argumento for passado, exibe ajuda
 if [[ $# -eq 0 ]]; then
@@ -173,28 +182,31 @@ fi
 validate_ipv4 "${VHOST_SERVER_IP}"
 validate_port "${VHOST_SERVER_PORT}"
 validate_domain "${VHOST_SERVER_DOMAIN}"
-validate_proxy_ssl "${VHOST_PROXY_SSL}" # Valida a opção
-validate_proxy_target "${VHOST_PROXY_TARGET}" # Validar por último para incluir o aviso de porta se necessário
+validate_proxy_ssl "${VHOST_PROXY_SSL}"
+validate_proxy_target "${VHOST_PROXY_TARGET}" 
 
 log "Parâmetros validados com sucesso."
 
-# Determina o protocolo para o proxy_pass e configura opções SSL do backend
-PROXY_PROTOCOL="http"
-PROXY_SSL_BACKEND_CONFIG="" # Bloco de configuração SSL para o backend
-if [[ "$(echo "$VHOST_PROXY_SSL" | tr '[:upper:]' '[:lower:]')" == "yes" ]]; then
-  PROXY_PROTOCOL="https"
-  PROXY_SSL_BACKEND_CONFIG=$(
-    cat <<EOF
+# Define o nome do upstream baseado no domínio (mais seguro que um nome fixo)
+# Substitui caracteres inválidos (ponto, hífen) por underscore
+UPSTREAM_NAME="${VHOST_SERVER_DOMAIN//[.-]/_}_backend"
 
-        # --- Tratamento de SSL para o Backend (quando --vhost-proxy-ssl=yes) ---
-        # ATENÇÃO: 'proxy_ssl_verify off' DESABILITA a validação do certificado do backend.
-        # Necessário se o backend usa certificado auto-assinado. É MENOS SEGURO.
-        # Se possível, use um certificado válido no backend ou importe o CA via 'proxy_ssl_trusted_certificate'.
+# Define o protocolo real para comentários (não usado diretamente no proxy_pass com upstream)
+BACKEND_PROTOCOL="http"
+# Bloco de configuração SSL para o backend (adicionado somente se --vhost-proxy-ssl=yes)
+PROXY_SSL_BACKEND_CONFIG_BLOCK=""
+if [[ "$(echo "$VHOST_PROXY_SSL" | tr '[:upper:]' '[:lower:]')" == "yes" ]]; then
+  BACKEND_PROTOCOL="https"
+  # Gera o bloco de texto com indentação correta
+  PROXY_SSL_BACKEND_CONFIG_BLOCK=$(cat <<EOF
+
+        # --- Tratamento de SSL para o Backend (opção --vhost-proxy-ssl=yes) ---
+        # Permite conexão com backend HTTPS com certificado auto-assinado/inválido.
+        # MENOS SEGURO. Se possível, use certificado válido no backend.
         proxy_ssl_verify off;
-        # Passa o nome do servidor para o backend (importante para SNI se o backend suportar)
-        proxy_ssl_server_name on;
+        proxy_ssl_server_name on; # Envia o SNI para o backend
 EOF
-  )
+)
 fi
 
 # === Lógica Principal ===
@@ -209,74 +221,88 @@ main() {
   info "Verificando se o arquivo de configuração já existe: ${vhost_file_path}"
   if [[ -f "${vhost_file_path}" ]]; then
     warn "Arquivo de configuração ${vhost_file_path} já existe. Ele será sobrescrito."
-    # Opcional: Fazer backup antes de sobrescrever
+    # Opcional: Backup
     # cp "${vhost_file_path}" "${vhost_file_path}.bak_$(date +%F_%T)" || warn "Falha ao criar backup."
   fi
 
-  log "Criando arquivo de configuração Nginx para ${VHOST_SERVER_DOMAIN} (Proxy Reverso)..."
+  log "Criando arquivo de configuração Nginx para ${VHOST_SERVER_DOMAIN} com Upstream Keepalive..."
 
   # Cria o diretório de logs Nginx se não existir
   mkdir -p "${NGINX_LOG_DIR}" || error_exit "Falha ao criar diretório de logs: ${NGINX_LOG_DIR}"
 
-  # Heredoc para criar o arquivo de configuração
-  # Usamos printf para inserir o bloco de configuração SSL do backend condicionalmente
-  printf "# Configuração de Proxy Reverso para ${VHOST_SERVER_DOMAIN}\n" > "${vhost_file_path}" || error_exit "Falha ao escrever no arquivo de configuração ${vhost_file_path}"
+  # Cria o arquivo de configuração usando printf para controle de formatação
+  # e inserção segura do bloco SSL condicional.
+  # Usamos %s como placeholders para as variáveis.
+
+  printf "# Configuração Nginx para %s (Proxy Reverso com Upstream)\n" "${VHOST_SERVER_DOMAIN}" > "${vhost_file_path}" || error_exit "Falha ao escrever no arquivo de configuração ${vhost_file_path}"
   printf "# Gerado por script em %s\n" "$(date)" >> "${vhost_file_path}"
-  printf "# Alvo do Proxy: %s://%s\n\n" "${PROXY_PROTOCOL}" "${VHOST_PROXY_TARGET}" >> "${vhost_file_path}"
+  printf "# Backend Target: %s://%s\n\n" "${BACKEND_PROTOCOL}" "${VHOST_PROXY_TARGET}" >> "${vhost_file_path}" # Comentário informativo
 
-  cat >>"${vhost_file_path}" <<EOF || error_exit "Falha ao escrever no arquivo de configuração ${vhost_file_path}"
-server {
-    listen ${VHOST_SERVER_IP}:${VHOST_SERVER_PORT};
-    server_name ${VHOST_SERVER_DOMAIN};
+  # Bloco Upstream
+  printf "upstream %s {\n" "${UPSTREAM_NAME}" >> "${vhost_file_path}"
+  printf "    server %s;\n" "${VHOST_PROXY_TARGET}" >> "${vhost_file_path}"
+  printf "    keepalive %d;\n" "${KEEPALIVE_COUNT}" >> "${vhost_file_path}"
+  printf "}\n\n" >> "${vhost_file_path}"
 
-    # Logs específicos
-    access_log ${NGINX_LOG_DIR}/${VHOST_SERVER_DOMAIN}.access.log;
-    error_log ${NGINX_LOG_DIR}/${VHOST_SERVER_DOMAIN}.error.log warn;
+  # Bloco Server
+  printf "server {\n" >> "${vhost_file_path}"
+  printf "    listen %s:%s;\n" "${VHOST_SERVER_IP}" "${VHOST_SERVER_PORT}" >> "${vhost_file_path}"
+  printf "    server_name %s;\n\n" "${VHOST_SERVER_DOMAIN}" >> "${vhost_file_path}"
 
-    # Aumentar o tamanho máximo do corpo da solicitação (ajuste conforme necessário)
-    client_max_body_size 20m;
+  # Logs
+  printf "    access_log %s/%s.access.log;\n" "${NGINX_LOG_DIR}" "${VHOST_SERVER_DOMAIN}" >> "${vhost_file_path}"
+  printf "    error_log %s/%s.error.log warn;\n\n" "${NGINX_LOG_DIR}" "${VHOST_SERVER_DOMAIN}" >> "${vhost_file_path}"
 
-    # --- Bloco Principal do Proxy Reverso ---
-    location / {
-        proxy_pass ${PROXY_PROTOCOL}://${VHOST_PROXY_TARGET};
+  # Configurações Gerais
+  printf "    client_max_body_size 20m;\n\n" >> "${vhost_file_path}" # Exemplo, pode precisar ajustar
 
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme; # Informa ao backend se a conexão original foi HTTP ou HTTPS
+  # Bloco Location /
+  printf "    location / {\n" >> "${vhost_file_path}"
+  # Proxy Pass para o Upstream (sempre http:// aqui, Nginx resolve)
+  printf "        proxy_pass http://%s;\n\n" "${UPSTREAM_NAME}" >> "${vhost_file_path}"
 
-        proxy_connect_timeout 60s;
-        proxy_send_timeout    60s;
-        proxy_read_timeout    60s;
-        send_timeout          60s;
+  # Cabeçalhos Essenciais do Proxy
+  printf "        proxy_set_header Host \$host;\n" >> "${vhost_file_path}"
+  printf "        proxy_set_header X-Real-IP \$remote_addr;\n" >> "${vhost_file_path}"
+  printf "        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;\n" >> "${vhost_file_path}"
+  printf "        proxy_set_header X-Forwarded-Proto \$scheme;\n\n" >> "${vhost_file_path}"
 
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-%s # Inserção condicional da configuração SSL do backend
+  # Configurações HTTP para Keepalive com Upstream
+  printf "        proxy_http_version 1.1;\n" >> "${vhost_file_path}"
+  printf "        proxy_set_header Connection \"\"; # Limpa Connection header para keepalive\n\n" >> "${vhost_file_path}" # IMPORTANTE
 
-        add_header X-Frame-Options SAMEORIGIN always;
-        add_header X-Content-Type-Options nosniff always;
-        # add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always; 
-    }
+  # Timeouts
+  printf "        proxy_connect_timeout 60s;\n" >> "${vhost_file_path}"
+  printf "        proxy_send_timeout    60s;\n" >> "${vhost_file_path}"
+  printf "        proxy_read_timeout    60s;\n" >> "${vhost_file_path}"
+  printf "        send_timeout          60s;\n" >> "${vhost_file_path}"
 
-    location ~ /\. {
-        deny all;
-    }
-}
-EOF
+  # Inserção Condicional do Bloco SSL do Backend
+  # Se PROXY_SSL_BACKEND_CONFIG_BLOCK não estiver vazio, adiciona-o
+  if [[ -n "${PROXY_SSL_BACKEND_CONFIG_BLOCK}" ]]; then
+      printf "%s\n" "${PROXY_SSL_BACKEND_CONFIG_BLOCK}" >> "${vhost_file_path}"
+  fi
+  printf "\n" >> "${vhost_file_path}" # Linha extra após bloco SSL ou timeouts
 
-  # Substitui o placeholder %s pelo conteúdo de PROXY_SSL_BACKEND_CONFIG
-  # Nota: Usar printf ou sed para inserção segura é melhor que expansão direta no heredoc
-  local temp_file="${vhost_file_path}.tmp"
-  printf "$(cat "${vhost_file_path}")" "${PROXY_SSL_BACKEND_CONFIG}" > "${temp_file}" && mv "${temp_file}" "${vhost_file_path}" \
-    || error_exit "Falha ao finalizar arquivo de configuração com detalhes SSL."
+  # Cabeçalhos de Segurança Adicionais
+  printf "        add_header X-Frame-Options SAMEORIGIN always;\n" >> "${vhost_file_path}"
+  printf "        add_header X-Content-Type-Options nosniff always;\n" >> "${vhost_file_path}"
+  # printf "        add_header Strict-Transport-Security \"max-age=31536000; includeSubDomains\" always; # Apenas se Nginx frontend usar HTTPS\n" >> "${vhost_file_path}"
 
+  printf "    }\n\n" >> "${vhost_file_path}" # Fim location /
 
-  log "Arquivo ${vhost_file_path} criado."
+  # Bloco Location para arquivos ocultos
+  printf "    location ~ /\\. {\n" >> "${vhost_file_path}"
+  printf "        deny all;\n" >> "${vhost_file_path}"
+  printf "    }\n" >> "${vhost_file_path}"
+
+  printf "}\n" >> "${vhost_file_path}" # Fim server
+
+  log "Arquivo ${vhost_file_path} criado no formato desejado."
+
+  # --- Restante do script (ativação, teste, reload) ---
 
   info "Ativando o site (criando link simbólico)..."
-  # Criar link simbólico -f força a substituição se já existir
   ln -sf "${vhost_file_path}" "${vhost_symlink_path}" || error_exit "Falha ao criar link simbólico em ${NGINX_SITES_ENABLED}."
   log "Site ${VHOST_SERVER_DOMAIN} ativado."
 
@@ -284,15 +310,15 @@ EOF
   if nginx -t; then
     log "Configuração do Nginx OK."
     info "Recarregando configuração do Nginx..."
+    # Usar 'systemctl reload nginx' é preferível
     if systemctl reload nginx; then
       log "Nginx recarregado com sucesso."
     else
-      # Tentar restart como fallback, pode ser necessário em algumas situações
       warn "Falha ao recarregar (reload), tentando reiniciar (restart)..."
       if systemctl restart nginx; then
           log "Nginx reiniciado com sucesso."
       else
-          error_exit "Falha ao recarregar e reiniciar o Nginx (systemctl reload/restart nginx)."
+          error_exit "Falha ao recarregar e reiniciar o Nginx (systemctl reload/restart nginx). Verifique os logs do Nginx."
       fi
     fi
   else
@@ -300,28 +326,33 @@ EOF
   fi
 
   echo ""
-  log "VirtualHost (Proxy Reverso) para ${VHOST_SERVER_DOMAIN} configurado com sucesso!"
+  log "VirtualHost (Proxy Reverso com Upstream) para ${VHOST_SERVER_DOMAIN} configurado com sucesso!"
   info "Detalhes:"
   info "  - Nginx Escutando em: ${VHOST_SERVER_IP}:${VHOST_SERVER_PORT}"
   info "  - Domínio Configurado: ${VHOST_SERVER_DOMAIN}"
-  info "  - Alvo do Proxy (Backend): ${PROXY_PROTOCOL}://${VHOST_PROXY_TARGET}"
+  info "  - Upstream Name: ${UPSTREAM_NAME}"
+  info "  - Alvo do Backend: ${BACKEND_PROTOCOL}://${VHOST_PROXY_TARGET}"
+  info "  - Keepalive: ${KEEPALIVE_COUNT}"
   info "  - Arquivo Conf: ${vhost_file_path}"
   info "  - Link Ativo: ${vhost_symlink_path}"
   info "  - Logs: ${NGINX_LOG_DIR}/${VHOST_SERVER_DOMAIN}.*"
   echo ""
 
-  # Aviso sobre porta do backend se for uma porta suspeita de ser UDP
-  if [[ "${VHOST_PROXY_TARGET}" =~ :(22003|22005|22126)$ ]]; then
-      warn "REFORÇANDO AVISO: O alvo do proxy (${VHOST_PROXY_TARGET}) usa uma porta frequentemente associada a protocolos UDP no MTASA."
-      warn "Este script configura um proxy ${YELLOW}HTTP/HTTPS${RESET}. Se '${VHOST_PROXY_TARGET}' não for um serviço web respondendo em HTTP/HTTPS,"
-      warn "o proxy ${RED}não funcionará${RESET}. Para proxy UDP, use o módulo 'stream' do Nginx (configuração diferente)."
+  # Reitera o aviso sobre a porta UDP se aplicável
+  local target_port
+  target_port=$(echo "${VHOST_PROXY_TARGET}" | cut -d: -f2)
+  if [[ "$target_port" == "22003" || "$target_port" == "22005" || "$target_port" == "22126" ]]; then
+      warn "${YELLOW}REFORÇANDO AVISO:${RESET} A porta ${target_port} no alvo do proxy (${VHOST_PROXY_TARGET}) é suspeita de ser UDP."
+      warn "Este script configura um proxy ${YELLOW}HTTP/HTTPS${RESET}. Se o serviço não responder via HTTP/HTTPS nesta porta,"
+      warn "o proxy ${RED}não funcionará${RESET}. Verifique a porta correta do serviço web."
       echo ""
   fi
 
   if [[ "$(echo "$VHOST_PROXY_SSL" | tr '[:upper:]' '[:lower:]')" == "yes" ]]; then
-    info "${YELLOW}AVISO DE SEGURANÇA:${RESET} A opção 'proxy_ssl_verify off' foi usada (porque --vhost-proxy-ssl=yes)."
-    info "Isso permite a conexão Nginx -> Backend via HTTPS mesmo se o backend usar um certificado inválido/auto-assinado."
-    info "Considere usar um certificado válido no serviço de backend (${VHOST_PROXY_TARGET}) para maior segurança."
+    info "${YELLOW}AVISO DE SEGURANÇA:${RESET} A opção '--vhost-proxy-ssl=yes' foi usada."
+    info "As diretivas 'proxy_ssl_verify off;' foram adicionadas para permitir conexão"
+    info "com backend HTTPS que usa certificado auto-assinado/inválido."
+    info "Para maior segurança, configure um certificado SSL válido no serviço de backend (${VHOST_PROXY_TARGET})."
     echo ""
   fi
 
@@ -329,18 +360,17 @@ EOF
   local access_protocol="http"
   if [[ "${VHOST_SERVER_PORT}" == "443" ]]; then
     access_protocol="https"
-    info "${YELLOW}AVISO:${RESET} A porta ${VHOST_SERVER_PORT} foi usada para o Nginx escutar, sugerindo HTTPS."
-    info "No entanto, este script ${YELLOW}NÃO${RESET} configura certificados SSL para o Nginx (${VHOST_SERVER_DOMAIN})."
-    info "Você precisará configurar manualmente (ex: com Certbot/Let's Encrypt) o SSL neste VHost Nginx para que ${access_protocol}://${VHOST_SERVER_DOMAIN} funcione corretamente."
+    info "${YELLOW}AVISO:${RESET} O Nginx está escutando na porta 443, sugerindo HTTPS."
+    info "Este script ${YELLOW}NÃO${RESET} configura certificados SSL para o ${VHOST_SERVER_DOMAIN} no Nginx."
+    info "Você precisará configurar SSL manualmente (ex: com Certbot) para ${access_protocol}://${VHOST_SERVER_DOMAIN} funcionar."
   fi
 
   local access_url="${access_protocol}://${VHOST_SERVER_DOMAIN}"
-  # Adicionar porta à URL se não for padrão (80 para http, 443 para https)
   if [[ "${access_protocol}" == "http" && "${VHOST_SERVER_PORT}" != "80" ]] || \
      [[ "${access_protocol}" == "https" && "${VHOST_SERVER_PORT}" != "443" ]]; then
     access_url+=":${VHOST_SERVER_PORT}"
   fi
-  info "${YELLOW}Acesse o serviço através do Nginx (após configurar DNS/hosts se necessário):${RESET} ${access_url}"
+  info "${YELLOW}Acesse o serviço através do Nginx (após configurar DNS/hosts):${RESET} ${access_url}"
 
 }
 
