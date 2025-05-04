@@ -4,7 +4,7 @@ set -euo pipefail
 
 FILE="mtasa.lxc.tar.gz"
 
-URL="https://github.com/supremesolid/ubuntu-automation-tools/raw/refs/heads/master/LXD/mtasa.lxc.tar.gz?download="
+URL="https://github.com/supremesolid/ubuntu-automation-tools/raw/master/LXD/mtasa.lxc.tar.gz"
 
 echo "Baixando imagem..."
 
@@ -14,6 +14,12 @@ echo "Importando imagem para o LXD..."
 lxc image import "$FILE" --alias mtasa
 
 echo "Criando container 'mtasa' sem iniciar..."
+
+mkdir -p /docker/mtasa
+
+lxc config device add mtasa folder_docker disk source=/docker/mtasa path=/docker/mtasa
+lxc config device add mtasa folder_home disk source=/home/mtasa path=/home/mtasa
+
 lxc init mtasa mtasa
 
 echo "Removendo arquivo temporário..."
