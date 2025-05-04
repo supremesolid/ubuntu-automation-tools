@@ -16,7 +16,7 @@ a2enmod mpm_itk
 
 ports="/etc/apache2/ports.conf"
 
-echo '<Listen 127.0.0.1:80' > "$ports"
+echo 'Listen 127.0.0.1:80' > "$ports"
 echo '' >> "$ports"
 echo '<IfModule ssl_module>' >> "$ports"
 echo '	Listen 127.0.0.1:443' >> "$ports"
