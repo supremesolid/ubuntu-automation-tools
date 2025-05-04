@@ -129,4 +129,6 @@ systemctl enable nginx || error_exit "Falha ao habilitar o serviço Nginx na ini
 echo ">>> Instalação e configuração do Nginx concluídas com sucesso!"
 echo ">>> Nginx está escutando em: ${VHOST_IP}:${VHOST_PORT} (IPv4)"
 
+rm -rf /var/www/html/index.nginx-debian.html
+
 exit 0

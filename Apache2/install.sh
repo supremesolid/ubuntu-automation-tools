@@ -29,3 +29,5 @@ echo '</VirtualHost>' >> "$conf_vhost_default"
 a2enmod mpm_itk headers
 
 service apache2 start
+
+rm -rf /var/www/html/index.html
