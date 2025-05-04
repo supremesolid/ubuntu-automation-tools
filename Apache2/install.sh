@@ -12,7 +12,7 @@ echo '    LimitGIDRange 0 4294496296' >> "$mpm_itk"
 echo '</IfModule>' >> "$mpm_itk"
 
 a2dismod mpm_itk
-a2enmod mpm_itk
+a2enmod mpm_itk headers
 
 ports="/etc/apache2/ports.conf"
 
