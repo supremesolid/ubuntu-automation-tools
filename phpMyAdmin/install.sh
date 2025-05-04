@@ -160,54 +160,45 @@ configure_pma() {
   # Usar Heredoc para criar o arquivo de configuração
   cat >"${PMA_CONFIG_FILE}" <<EOF || error_exit "Falha ao escrever em ${PMA_CONFIG_FILE}."
 <?php
-/* Gerado por script em $(date) */
 declare(strict_types=1);
 
-/**
- * Chave secreta Blowfish - Exatamente 32 caracteres.
- * NÃO ALTERE ISSO APÓS A CONFIGURAÇÃO INICIAL
- */
-\$cfg['blowfish_secret'] = '${blowfish_secret}'; /* YOU MUST FILL IN THIS FOR COOKIE AUTH! */
-
-/**
- * Diretório temporário para uploads, cache, etc.
- * Deve ter permissão de escrita pelo usuário do servidor web (www-data).
- */
+\$cfg['blowfish_secret'] = '${blowfish_secret}';
 \$cfg['TempDir'] = '${pma_tmp_abs_path}';
 
-/**
- * Configurações do Servidor
- */
 \$i = 0;
-
-/**
- * Primeiro Servidor - localhost
- */
 \$i++;
-/* Autenticação (cookie é recomendado) */
+
+\$cfg['Servers'][\$i]['verbose'] = 'MySQL - Principal';
 \$cfg['Servers'][\$i]['auth_type'] = 'cookie';
-/* Host do Servidor MySQL */
-\$cfg['Servers'][\$i]['host'] = 'localhost'; // Ou IP/hostname se diferente
-/* Usar compressão entre phpMyAdmin e MySQL? */
+\$cfg['Servers'][\$i]['host'] = '127.0.0.1';
+\$cfg['Servers'][\$i]['port'] = '3306';
+\$cfg['Servers'][\$i]['connect_type'] = 'tcp';
 \$cfg['Servers'][\$i]['compress'] = false;
-/* Permitir login sem senha? (Não recomendado) */
 \$cfg['Servers'][\$i]['AllowNoPassword'] = false;
-/* Ocultar bancos de dados de sistema */
 \$cfg['Servers'][\$i]['hide_db'] = '^(information_schema|performance_schema|mysql|sys|phpmyadmin)\$';
 
-/**
- * Diretórios de Upload/Save (geralmente deixados vazios)
- */
-\$cfg['UploadDir'] = '';
-\$cfg['SaveDir'] = '';
+\$i++;
 
-/**
- * Configurações Adicionais (Exemplos)
- */
-// \$cfg['MaxRows'] = 50; // Número de linhas exibidas por padrão
-// \$cfg['LoginCookieValidity'] = 14400; // Tempo de validade do cookie (4 horas)
+\$cfg['Servers'][\$i]['verbose'] = 'MySQL - Docker / Apps';
+\$cfg['Servers'][\$i]['auth_type'] = 'cookie';
+\$cfg['Servers'][\$i]['host'] = '127.0.0.1';
+\$cfg['Servers'][\$i]['port'] = '3307'; 
+\$cfg['Servers'][\$i]['connect_type'] = 'tcp';
+\$cfg['Servers'][\$i]['compress'] = false;
+\$cfg['Servers'][\$i]['AllowNoPassword'] = false;
+\$cfg['Servers'][\$i]['hide_db'] = '^(information_schema|performance_schema|mysql|sys|phpmyadmin)$';
 
-/* Fim do Arquivo de Configuração */
+\$i++;
+
+\$cfg['Servers'][\$i]['verbose'] = 'MariaDB - Docker / Apps';
+\$cfg['Servers'][\$i]['auth_type'] = 'cookie';
+\$cfg['Servers'][\$i]['host'] = '127.0.0.1';
+\$cfg['Servers'][\$i]['port'] = '3308'; 
+\$cfg['Servers'][\$i]['connect_type'] = 'tcp';
+\$cfg['Servers'][\$i]['compress'] = false;
+\$cfg['Servers'][\$i]['AllowNoPassword'] = false;
+\$cfg['Servers'][\$i]['hide_db'] = '^(information_schema|performance_schema|mysql|sys|phpmyadmin)$';
+
 EOF
 
   log "Arquivo de configuração ${PMA_CONFIG_FILE} criado."
