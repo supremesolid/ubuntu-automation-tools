@@ -3,29 +3,26 @@
 set -euo pipefail
 
 FILE="mtasa.lxc.tar.gz"
-
 URL="https://github.com/supremesolid/ubuntu-automation-tools/raw/master/LXD/mtasa.lxc.tar.gz"
 
 echo "Baixando imagem..."
-
 wget -O "$FILE" "$URL"
 
-echo "Importando imagem para o LXD..."
-lxc image import "$FILE" --alias mtasa
+echo "Importando backup do container..."
+lxc import "$FILE"
 
-echo "Criando container 'mtasa' sem iniciar..."
-
-mkdir -p /docker/mtasa
-
+echo "Adicionando diretórios montados..."
+mkdir -p /docker/mtasa /home/mtasa
 lxc config device add mtasa folder_docker disk source=/docker/mtasa path=/docker/mtasa
 lxc config device add mtasa folder_home disk source=/home/mtasa path=/home/mtasa
-
-lxc init mtasa mtasa
 
 echo "Removendo arquivo temporário..."
 rm -f "$FILE"
 
-echo "Container 'mtasa' criado. Use 'lxc start mtasa' para iniciar."
-
+echo "Configurando IP fixo (opcional)..."
 lxc config device override mtasa eth0 ipv4.address=10.0.0.2
+
+echo "Iniciando container..."
 lxc start mtasa
+
+echo "Container 'mtasa' restaurado e iniciado com sucesso."
