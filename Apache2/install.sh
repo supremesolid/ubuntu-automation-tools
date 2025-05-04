@@ -4,7 +4,7 @@ set -euo pipefail
 
 apt-get install -y apache2 libapache2-mpm-itk
 
-systemctl restart stop
+service apache2 stop
 
 conf_mpm_itk="/etc/apache2/mods-available/mpm_itk.conf"
 conf_ports="/etc/apache2/ports.conf"
@@ -28,4 +28,4 @@ echo '</VirtualHost>' >> "$conf_vhost_default"
 
 a2enmod mpm_itk headers
 
-systemctl restart apache2
+service apache2 start
