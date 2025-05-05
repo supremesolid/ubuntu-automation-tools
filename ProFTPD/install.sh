@@ -125,7 +125,7 @@ echo "--------------------------------------------------"
 # 1. Instalar Módulos Específicos do ProFTPD
 STEP="INSTALL_MODULES"
 echo "--> 1/7: Instalando módulos ProFTPD (mysql, crypto, ldap)..."
-apt install -y proftpd-mod-mysql proftpd-mod-crypto proftpd-mod-ldap
+apt install -y proftpd-mod-mysql proftpd-mod-crypto proftpd-mod-ldap whois
 check_error "apt install proftpd-mods"
 echo "Módulos ProFTPD instalados com sucesso."
 
