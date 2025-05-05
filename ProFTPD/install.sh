@@ -7,9 +7,9 @@ MYSQL_PROFTPD_HOST="localhost"
 # === Constantes ===
 MYSQL_PROFTPD_DB="proftpd"
 PROFTPD_CONFIG_DIR="/etc/proftpd"
-CREATE_USER_SCRIPT_URL="https://supremesolid.github.io/ubuntu-automation-tools/MySQL/create-user.sh"
-SQL_SCHEMA_URL="https://supremesolid.github.io/ubuntu-automation-tools/ProFTPD/proftpd.sql"
-CONFIG_BASE_URL="https://supremesolid.github.io/ubuntu-automation-tools/ProFTPD/configs"
+CREATE_USER_SCRIPT_URL="https://raw.githubusercontent.com/supremesolid/ubuntu-automation-tools/refs/heads/master/MySQL/create-user.sh"
+SQL_SCHEMA_URL="https://raw.githubusercontent.com/supremesolid/ubuntu-automation-tools/refs/heads/master/ProFTPD/proftpd.sql"
+CONFIG_BASE_URL="https://raw.githubusercontent.com/supremesolid/ubuntu-automation-tools/refs/heads/master/ProFTPD/configs"
 PROFTPD_SERVICE_NAME="proftpd" 
 CONFIG_FILES=(
     "geoip.conf"
