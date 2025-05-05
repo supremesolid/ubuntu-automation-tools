@@ -64,6 +64,7 @@ docker create -it \
   --network host \
   --workdir "/home/mtasa/$NAME" \
   --user mtasa \
+  --restart=always \
   --entrypoint "/docker/mtasa/$NAME/entrypoint.sh" \
   -v "/home/mtasa/$NAME:/home/mtasa/$NAME" \
   -v "/docker/mtasa/$NAME:/docker/mtasa/$NAME" \
