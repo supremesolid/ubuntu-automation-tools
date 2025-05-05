@@ -4,7 +4,7 @@
 # Original request used 'proftpd', you changed to 'root'.
 # Using 'proftpd' is generally recommended for security (least privilege).
 # If you MUST use 'root', ensure it's configured for unix_socket auth in MySQL.
- DB_USER="root" # Use this line INSTEAD if you absolutely need to use root
+DB_USER="root" # Use this line INSTEAD if you absolutely need to use root
 DB_NAME="proftpd"
 DEFAULT_SHELL="/sbin/nologin"
 HOMEDIR_BASE="/home" # Base directory for user homes
