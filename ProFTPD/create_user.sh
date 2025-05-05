@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Default values
-DB_USER="proftpd"
+DB_USER="root"
 DB_NAME="proftpd"
 DEFAULT_SHELL="/sbin/nologin"
 HOMEDIR_BASE="/home" # Base directory for user homes
