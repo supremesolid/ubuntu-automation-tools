@@ -54,7 +54,7 @@ mkdir $NAME
 
 cd $NAME
 
-wget https://supremesolid.github.io/ubuntu-automation-tools/Mtasa/entrypoint.sh
+wget https://raw.githubusercontent.com/supremesolid/ubuntu-automation-tools/refs/heads/master/Mtasa/entrypoint.sh
 
 chown mtasa:mtasa entrypoint.sh
 chmod -R 777 entrypoint.sh
