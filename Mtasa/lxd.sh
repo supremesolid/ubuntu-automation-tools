@@ -3,7 +3,7 @@
 set -euo pipefail
 
 FILE="mtasa.lxc.tar.gz"
-URL="https://github.com/supremesolid/ubuntu-automation-tools/raw/master/LXD/mtasa.lxc.tar.gz"
+URL="https://media.githubusercontent.com/media/supremesolid/ubuntu-automation-tools/refs/heads/master/LXD/mtasa.lxc.tar.gz"
 
 echo "Baixando imagem..."
 wget -O "$FILE" "$URL"
