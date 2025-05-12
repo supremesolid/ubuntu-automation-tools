@@ -9,10 +9,11 @@ if [ -z "$1" ]; then
 fi
 
 EXECUTAVEL="$1"
-CMD="$EXECUTAVEL -n --child-process"
+LIBZSTD="/usr/lib/x86_64-linux-gnu/libzstd.so.1"
+CMD="LD_PRELOAD=$LIBZSTD $EXECUTAVEL -n --child-process"
 
 if [ "$(id -u)" -eq 0 ]; then
     exec su -s /bin/bash mtasa -c "$CMD"
 else
-    exec $CMD
+    exec bash -c "$CMD"
 fi
