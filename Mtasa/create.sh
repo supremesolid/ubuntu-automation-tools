@@ -66,6 +66,7 @@ docker create -it \
   --user mtasa \
   --restart=always \
   --entrypoint "/docker/mtasa/$NAME/entrypoint.sh" \
+  -v "/mnt:/mnt" \
   -v "/home/mtasa/$NAME:/home/mtasa/$NAME" \
   -v "/docker/mtasa/$NAME:/docker/mtasa/$NAME" \
   supremesolid/mtasa:lts \
